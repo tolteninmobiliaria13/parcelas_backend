@@ -3,7 +3,7 @@ from typing import List
 from django.db.models import Sum
 from datetime import date
 from ..models import Contrato, Pago
-from ..schemas.dashboard import DashboardStatsSchema, LotSchema
+from ..schemas.dashboard import DashboardStatsSchema, LotSchema, PaginatedLotSchema
 
 router = Router()
 
@@ -51,12 +51,17 @@ def obtener_dashboard_stats(request):
         "proximos_vencimientos": proximos_vencimientos
     }
 
-@router.get("/lots", response=List[LotSchema])
-def listar_dashboard_lots(request):
-    from collections import defaultdict
-    from django.db.models import Sum, Q
+@router.get("/lots", response=PaginatedLotSchema)
+def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
+    import math
+    from django.db.models import Sum, Min, Max, Q
 
-    contratos = list(Contrato.objects.select_related('cliente', 'parcela').all())
+    queryset = Contrato.objects.select_related('cliente', 'parcela').all().order_by('id')
+    total = queryset.count()
+    pages = math.ceil(total / limit) if limit > 0 else 1
+    offset = (page - 1) * limit
+    
+    contratos = list(queryset[offset:offset+limit])
     contrato_ids = [c.id for c in contratos]
     today = date.today()
 
@@ -82,24 +87,26 @@ def listar_dashboard_lots(request):
     )
     balance_map = {item['contrato_id']: float(item['total'] or 0.0) for item in pagos_balance}
 
-    # Get next due payment for each contract in 1 query (grouped)
-    unpaid_pagos = Pago.objects.filter(contrato_id__in=contrato_ids, estado__in=['pendiente', 'vencido']).order_by('fecha_vencimiento')
-    next_pagos_map = {}
-    for p in unpaid_pagos:
-        if p.contrato_id not in next_pagos_map:
-            next_pagos_map[p.contrato_id] = p.fecha_vencimiento
+    # Get next due payment for each contract using Min
+    unpaid_pagos = (
+        Pago.objects.filter(contrato_id__in=contrato_ids, estado__in=['pendiente', 'vencido'])
+        .values('contrato_id')
+        .annotate(next_due=Min('fecha_vencimiento'))
+    )
+    next_pagos_map = {item['contrato_id']: item['next_due'] for item in unpaid_pagos}
 
-    # Get last paid payment date for each contract in 1 query
-    paid_pagos = Pago.objects.filter(contrato_id__in=contrato_ids, estado='pagado').order_by('-fecha_pago_real')
-    last_payments_map = {}
-    for p in paid_pagos:
-        if p.contrato_id not in last_payments_map:
-            last_payments_map[p.contrato_id] = p.fecha_pago_real
+    # Get last paid payment date for each contract using Max
+    paid_pagos = (
+        Pago.objects.filter(contrato_id__in=contrato_ids, estado='pagado')
+        .values('contrato_id')
+        .annotate(last_paid=Max('fecha_pago_real'))
+    )
+    last_payments_map = {item['contrato_id']: item['last_paid'] for item in paid_pagos}
 
-    # Fetch installment value (first payment of each contract) in one query
+    # Fetch installment value (first payment of each contract) in one query, directly fetching values
     first_payments = {
-        p.contrato_id: p 
-        for p in Pago.objects.filter(contrato_id__in=contrato_ids, numero_cuota=1)
+        item['contrato_id']: item['monto_cobrar']
+        for item in Pago.objects.filter(contrato_id__in=contrato_ids, numero_cuota=1).values('contrato_id', 'monto_cobrar')
     }
 
     resultado = []
@@ -113,8 +120,7 @@ def listar_dashboard_lots(request):
         last_pago_date = last_payments_map.get(c.id)
         last_payment_date = last_pago_date.strftime("%d/%m/%Y") if last_pago_date else None
 
-        primer_pago = first_payments.get(c.id)
-        installment_value = float(primer_pago.monto_cobrar) if primer_pago else 0.0
+        installment_value = float(first_payments.get(c.id, 0.0))
 
         resultado.append({
             "id": str(c.id),
@@ -130,4 +136,9 @@ def listar_dashboard_lots(request):
             "lastPaymentDate": last_payment_date,
             "paymentMethod": "Transferencia"
         })
-    return resultado
+    return {
+        "items": resultado,
+        "total": total,
+        "page": page,
+        "pages": pages
+    }

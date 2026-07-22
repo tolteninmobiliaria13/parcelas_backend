@@ -2,17 +2,23 @@ from ninja import Router, Schema
 from typing import List
 from django.db.models import Sum
 from ..models import Parcela, Contrato, Cliente, Pago
-from ..schemas.parcelas import ParcelaCompletaSchema, ParcelaInSchema, AsignarPropietarioInSchema
+from ..schemas.parcelas import ParcelaCompletaSchema, ParcelaInSchema, AsignarPropietarioInSchema, PaginatedParcelaSchema
 from ..schemas.clientes import ClienteSchema, ClienteInSchema
 
 router = Router()
 
-@router.get("/", response=List[ParcelaCompletaSchema])
-def listar_parcelas(request):
+@router.get("/", response=PaginatedParcelaSchema)
+def listar_parcelas(request, page: int = 1, limit: int = 20):
+    import math
     from collections import defaultdict
     from django.db.models import Sum
 
-    parcelas = list(Parcela.objects.all())
+    queryset = Parcela.objects.all().order_by('numero_lote')
+    total = queryset.count()
+    pages = math.ceil(total / limit) if limit > 0 else 1
+    offset = (page - 1) * limit
+    
+    parcelas = list(queryset[offset:offset+limit])
     contratos = list(Contrato.objects.filter(estado='activo').select_related('cliente'))
     contratos_map = {c.parcela_id: c for c in contratos}
 
@@ -67,7 +73,12 @@ def listar_parcelas(request):
             "subdivision": p.subdivision,
             "estado": p.estado
         })
-    return resultado
+    return {
+        "items": resultado,
+        "total": total,
+        "page": page,
+        "pages": pages
+    }
 
 @router.post("/", response={201: ParcelaCompletaSchema})
 def crear_parcela(request, payload: ParcelaInSchema):

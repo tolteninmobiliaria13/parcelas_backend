@@ -33,3 +33,9 @@ class ParcelaCompletaSchema(Schema):
     subdivision: str
     estado: str
 
+class PaginatedParcelaSchema(Schema):
+    items: list[ParcelaCompletaSchema]
+    total: int
+    page: int
+    pages: int
+

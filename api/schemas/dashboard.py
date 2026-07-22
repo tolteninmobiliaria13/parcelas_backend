@@ -20,3 +20,9 @@ class LotSchema(Schema):
     status: str
     lastPaymentDate: Optional[str] = None
     paymentMethod: Optional[str] = None
+
+class PaginatedLotSchema(Schema):
+    items: list[LotSchema]
+    total: int
+    page: int
+    pages: int
