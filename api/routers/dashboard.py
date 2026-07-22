@@ -9,12 +9,14 @@ router = Router()
 
 @router.get("/stats", response=DashboardStatsSchema)
 def obtener_dashboard_stats(request):
-    # total_por_pagar: pagos pendientes o vencidos
-    unpaid = Pago.objects.filter(estado__in=['pendiente', 'vencido'])
-    total_por_pagar = unpaid.aggregate(total=Sum('monto_cobrar'))['total'] or 0.0
-
-    # total_pagado_mes: pagos pagados en el mes actual
     today = date.today()
+    # total_por_pagar: cuotas del mes actual que aún no han sido pagadas
+    unpaid_this_month = Pago.objects.filter(
+        estado__in=['pendiente', 'vencido'],
+        fecha_vencimiento__year=today.year,
+        fecha_vencimiento__month=today.month,
+    )
+    total_por_pagar = unpaid_this_month.aggregate(total=Sum('monto_cobrar'))['total'] or 0.0
     paid_this_month = Pago.objects.filter(
         estado='pagado', 
         fecha_pago_real__year=today.year, 

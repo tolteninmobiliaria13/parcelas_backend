@@ -1,7 +1,7 @@
-from ninja import Router
-from typing import List
+from ninja import Router, Schema
+from typing import List, Optional
 from datetime import date
-from ..models import Contrato
+from ..models import Contrato, Pago
 from ..schemas.vencimientos import LotPaymentMatrixSchema, MonthlyPaymentSchema
 
 router = Router()
@@ -105,9 +105,6 @@ def obtener_vencimientos(request, year: int = 2025):
             "payments": payments_list
         })
     return resultado
-
-from ninja import Schema
-from ..models import Pago
 
 class PagoUpdateSchema(Schema):
     monto_cobrar: Optional[float] = None
