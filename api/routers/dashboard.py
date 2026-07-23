@@ -54,7 +54,6 @@ def obtener_dashboard_stats(request):
 @router.get("/lots", response=PaginatedLotSchema)
 def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
     import math
-    from django.db.models import Sum, Min, Max, Q
 
     queryset = Contrato.objects.select_related('cliente', 'parcela').all().order_by('id')
     total = queryset.count()
@@ -62,65 +61,11 @@ def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
     offset = (page - 1) * limit
     
     contratos = list(queryset[offset:offset+limit])
-    contrato_ids = [c.id for c in contratos]
-    today = date.today()
-
-    # Query all active payments of these contracts that are overdue
-    pagos_vencidos_set = set(
-        Pago.objects.filter(
-            contrato_id__in=contrato_ids,
-            estado='vencido'
-        ).values_list('contrato_id', flat=True)
-    ) | set(
-        Pago.objects.filter(
-            contrato_id__in=contrato_ids,
-            estado='pendiente',
-            fecha_vencimiento__lt=today
-        ).values_list('contrato_id', flat=True)
-    )
-
-    # Get balance of pending/overdue payments grouped by contract in 1 query
-    pagos_balance = (
-        Pago.objects.filter(contrato_id__in=contrato_ids, estado__in=['pendiente', 'vencido'])
-        .values('contrato_id')
-        .annotate(total=Sum('monto_cobrar'))
-    )
-    balance_map = {item['contrato_id']: float(item['total'] or 0.0) for item in pagos_balance}
-
-    # Get next due payment for each contract using Min
-    unpaid_pagos = (
-        Pago.objects.filter(contrato_id__in=contrato_ids, estado__in=['pendiente', 'vencido'])
-        .values('contrato_id')
-        .annotate(next_due=Min('fecha_vencimiento'))
-    )
-    next_pagos_map = {item['contrato_id']: item['next_due'] for item in unpaid_pagos}
-
-    # Get last paid payment date for each contract using Max
-    paid_pagos = (
-        Pago.objects.filter(contrato_id__in=contrato_ids, estado='pagado')
-        .values('contrato_id')
-        .annotate(last_paid=Max('fecha_pago_real'))
-    )
-    last_payments_map = {item['contrato_id']: item['last_paid'] for item in paid_pagos}
-
-    # Fetch installment value (first payment of each contract) in one query, directly fetching values
-    first_payments = {
-        item['contrato_id']: item['monto_cobrar']
-        for item in Pago.objects.filter(contrato_id__in=contrato_ids, numero_cuota=1).values('contrato_id', 'monto_cobrar')
-    }
-
+    
     resultado = []
     for c in contratos:
-        status = "overdue" if c.id in pagos_vencidos_set else "current"
-        saldo = balance_map.get(c.id, 0.0)
-        
-        next_due = next_pagos_map.get(c.id)
-        next_due_date = next_due.strftime("%d/%m/%Y") if next_due else None
-
-        last_pago_date = last_payments_map.get(c.id)
-        last_payment_date = last_pago_date.strftime("%d/%m/%Y") if last_pago_date else None
-
-        installment_value = float(first_payments.get(c.id, 0.0))
+        next_due_date = c.proximo_vencimiento.strftime("%d/%m/%Y") if c.proximo_vencimiento else None
+        last_payment_date = c.ultimo_pago.strftime("%d/%m/%Y") if c.ultimo_pago else None
 
         resultado.append({
             "id": str(c.id),
@@ -128,11 +73,11 @@ def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
             "owner": c.cliente.nombre_completo,
             "salePrice": float(c.parcela.precio_base),
             "downPayment": float(c.pie_inicial),
-            "balance": float(saldo),
+            "balance": float(c.saldo_pendiente),
             "installmentCount": c.total_cuotas,
-            "installmentValue": installment_value,
+            "installmentValue": float(c.installment_value),
             "nextDueDate": next_due_date,
-            "status": status,
+            "status": c.estado_calculado,
             "lastPaymentDate": last_payment_date,
             "paymentMethod": "Transferencia"
         })

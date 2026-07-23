@@ -10,8 +10,6 @@ router = Router()
 @router.get("/", response=PaginatedParcelaSchema)
 def listar_parcelas(request, page: int = 1, limit: int = 20):
     import math
-    from collections import defaultdict
-    from django.db.models import Sum
 
     queryset = Parcela.objects.all().order_by('numero_lote')
     total = queryset.count()
@@ -22,39 +20,18 @@ def listar_parcelas(request, page: int = 1, limit: int = 20):
     contratos = list(Contrato.objects.filter(estado='activo').select_related('cliente'))
     contratos_map = {c.parcela_id: c for c in contratos}
 
-    # Fetch aggregated payments for active contracts
-    pagos_data = Pago.objects.filter(contrato__estado='activo').values('contrato_id', 'estado').annotate(total=Sum('monto_cobrar'))
-    
-    # Identify contracts that have at least one overdue payment (either explicit 'vencido' or 'pendiente' ya vencido)
-    from django.db.models import Q
-    vencidos_set = set(
-        Pago.objects.filter(
-            Q(contrato__estado='activo') &
-            (Q(estado='vencido') | Q(estado='pendiente', fecha_vencimiento__lt=date.today()))
-        )
-        .values_list('contrato_id', flat=True)
-        .distinct()
-    )
-
-    pagos_map = defaultdict(lambda: {"pagado": 0.0, "pendiente_vencido": 0.0})
-    for item in pagos_data:
-        c_id = item['contrato_id']
-        estado = item['estado']
-        total = float(item['total'] or 0.0)
-        if estado == 'pagado':
-            pagos_map[c_id]["pagado"] = total
-        elif estado in ['pendiente', 'vencido']:
-            pagos_map[c_id]["pendiente_vencido"] += total
-
     resultado = []
     for p in parcelas:
         contrato = contratos_map.get(p.id)
         if contrato:
             owner = contrato.cliente.nombre_completo
-            pagos_realizados = pagos_map[contrato.id]["pagado"]
+            # Total esperado en cuotas (asumiendo cuotas iguales) = cuotas * monto
+            total_cuotas_esperado = contrato.total_cuotas * contrato.installment_value
+            # Pagos realizados = Total esperado - saldo pendiente
+            pagos_realizados = float(total_cuotas_esperado) - float(contrato.saldo_pendiente)
             abono = float(contrato.pie_inicial) + pagos_realizados
-            saldo = pagos_map[contrato.id]["pendiente_vencido"]
-            status = "overdue" if contrato.id in vencidos_set else "current"
+            saldo = float(contrato.saldo_pendiente)
+            status = contrato.estado_calculado
         else:
             owner = "Sin Asignar"
             abono = 0.0

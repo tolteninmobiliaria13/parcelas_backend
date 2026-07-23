@@ -51,6 +51,13 @@ class Contrato(models.Model):
     total_cuotas = models.IntegerField()
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='activo')
 
+    # Nuevos campos cacheados
+    saldo_pendiente = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    proximo_vencimiento = models.DateField(null=True, blank=True)
+    ultimo_pago = models.DateField(null=True, blank=True)
+    estado_calculado = models.CharField(max_length=20, choices=[('current', 'Current'), ('overdue', 'Overdue'), ('inactive', 'Inactive')], default='inactive')
+    installment_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
     def __str__(self):
         return f"Contrato {self.id} - {self.cliente.nombre_completo}"
 
@@ -76,3 +83,56 @@ class Pago(models.Model):
 
     class Meta:
         db_table = 'pagos'
+
+# --- Signal y Helper de Recálculo ---
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
+from django.db.models import Sum, Min, Max
+
+def recalcular_contrato(contrato_id):
+    pagos = Pago.objects.filter(contrato_id=contrato_id)
+    if not pagos.exists():
+        Contrato.objects.filter(id=contrato_id).update(
+            saldo_pendiente=0,
+            proximo_vencimiento=None,
+            ultimo_pago=None,
+            estado_calculado='inactive',
+            installment_value=0
+        )
+        return
+
+    # Saldo de cuotas pendientes o vencidas
+    saldo = pagos.exclude(estado='pagado').aggregate(t=Sum('monto_cobrar'))['t'] or 0
+    
+    # Próximo vencimiento
+    proximo = pagos.exclude(estado='pagado').aggregate(m=Min('fecha_vencimiento'))['m']
+    
+    # Último pago
+    ultimo = pagos.filter(estado='pagado').aggregate(m=Max('fecha_pago_real'))['m']
+    
+    # Monto de primera cuota para "installment_value"
+    primera_cuota = pagos.order_by('numero_cuota').first()
+    inst_val = primera_cuota.monto_cobrar if primera_cuota else 0
+
+    # Determinar estado
+    vencidos = pagos.filter(estado='vencido').count()
+    pendientes = pagos.exclude(estado='pagado').count()
+    if vencidos > 0:
+        estado_calc = 'overdue'
+    elif pendientes > 0:
+        estado_calc = 'current'
+    else:
+        estado_calc = 'inactive'
+
+    Contrato.objects.filter(id=contrato_id).update(
+        saldo_pendiente=saldo,
+        proximo_vencimiento=proximo,
+        ultimo_pago=ultimo,
+        estado_calculado=estado_calc,
+        installment_value=inst_val
+    )
+
+@receiver(post_save, sender=Pago)
+@receiver(post_delete, sender=Pago)
+def update_contrato_cache(sender, instance, **kwargs):
+    recalcular_contrato(instance.contrato_id)
