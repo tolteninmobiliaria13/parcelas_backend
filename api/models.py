@@ -84,6 +84,24 @@ class Pago(models.Model):
     class Meta:
         db_table = 'pagos'
 
+class UsuarioPermitido(models.Model):
+    ROL_CHOICES = [
+        ('admin', 'Administrador'),
+        ('user', 'Usuario'),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField(unique=True, db_index=True)
+    nombre = models.CharField(max_length=255, blank=True, null=True)
+    rol = models.CharField(max_length=20, choices=ROL_CHOICES, default='user')
+    activo = models.BooleanField(default=True)
+    fecha_registro = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.email} ({self.rol})"
+
+    class Meta:
+        db_table = 'usuarios_permitidos'
+
 # --- Signal y Helper de Recálculo ---
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
