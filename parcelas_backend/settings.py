@@ -121,8 +121,14 @@ STORAGES = {
     },
 }
 
+from corsheaders.defaults import default_headers
+
 # CORS Configuration
 CORS_ALLOWED_ORIGINS = env.list(
     'CORS_ALLOWED_ORIGINS',
     default=['http://localhost:5173']
 )
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'x-user-email',
+]
