@@ -16,12 +16,37 @@ SPANISH_MONTHS = {
 }
 
 
+def clave_orden_lote_contrato(c: Contrato):
+    lote_str = c.parcela.numero_lote or ""
+    parts = lote_str.strip().split("-")
+    prefix = parts[0].strip().upper() if len(parts) > 0 else ""
+    
+    num = 0
+    if len(parts) > 1 and parts[1].strip().isdigit():
+        num = int(parts[1].strip())
+        
+    has_sub = len(parts) > 2
+    sub_is_num = False
+    sub_num = 0
+    sub_str = ""
+    
+    if has_sub:
+        sub_val = parts[2].strip()
+        if sub_val.isdigit():
+            sub_is_num = True
+            sub_num = int(sub_val)
+        else:
+            sub_str = sub_val.upper()
+            
+    return (prefix, num, 1 if has_sub else 0, 0 if sub_is_num else 1, sub_num, sub_str)
+
 @router.get("/", response=List[LotPaymentMatrixSchema])
 def obtener_vencimientos(request, year: int = 2025):
     from collections import defaultdict
     from django.db.models import Count
 
     contratos = list(Contrato.objects.select_related('cliente', 'parcela').all())
+    contratos.sort(key=clave_orden_lote_contrato)
     contrato_ids = [c.id for c in contratos]
 
     # Fetch all payments for these contracts for the given year in one query
