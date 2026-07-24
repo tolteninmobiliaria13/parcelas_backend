@@ -126,8 +126,12 @@ from corsheaders.defaults import default_headers
 # CORS Configuration
 CORS_ALLOWED_ORIGINS = env.list(
     'CORS_ALLOWED_ORIGINS',
-    default=['http://localhost:5173']
+    default=['http://localhost:5173', 'http://127.0.0.1:5173']
 )
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://proyecto-parcelas(-[a-z0-9-]+)?\.vercel\.app$",
+]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
     'x-user-email',
