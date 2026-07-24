@@ -51,16 +51,42 @@ def obtener_dashboard_stats(request):
         "proximos_vencimientos": proximos_vencimientos
     }
 
+def clave_orden_lote_contrato(c: Contrato):
+    lote_str = c.parcela.numero_lote or ""
+    parts = lote_str.strip().split("-")
+    prefix = parts[0].strip().upper() if len(parts) > 0 else ""
+    
+    num = 0
+    if len(parts) > 1 and parts[1].strip().isdigit():
+        num = int(parts[1].strip())
+        
+    has_sub = len(parts) > 2
+    sub_is_num = False
+    sub_num = 0
+    sub_str = ""
+    
+    if has_sub:
+        sub_val = parts[2].strip()
+        if sub_val.isdigit():
+            sub_is_num = True
+            sub_num = int(sub_val)
+        else:
+            sub_str = sub_val.upper()
+            
+    return (prefix, num, 1 if has_sub else 0, 0 if sub_is_num else 1, sub_num, sub_str)
+
 @router.get("/lots", response=PaginatedLotSchema)
 def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
     import math
 
-    queryset = Contrato.objects.select_related('cliente', 'parcela').all().order_by('id')
-    total = queryset.count()
+    todos_contratos = list(Contrato.objects.select_related('cliente', 'parcela').all())
+    todos_contratos.sort(key=clave_orden_lote_contrato)
+    
+    total = len(todos_contratos)
     pages = math.ceil(total / limit) if limit > 0 else 1
     offset = (page - 1) * limit
     
-    contratos = list(queryset[offset:offset+limit])
+    contratos = todos_contratos[offset:offset+limit]
     
     resultado = []
     for c in contratos:
