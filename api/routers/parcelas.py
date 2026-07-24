@@ -7,16 +7,42 @@ from ..schemas.clientes import ClienteSchema, ClienteInSchema
 
 router = Router()
 
+def clave_orden_lote(p: Parcela):
+    lote_str = p.numero_lote or ""
+    parts = lote_str.strip().split("-")
+    prefix = parts[0].strip().upper() if len(parts) > 0 else ""
+    
+    num = 0
+    if len(parts) > 1 and parts[1].strip().isdigit():
+        num = int(parts[1].strip())
+        
+    has_sub = len(parts) > 2
+    sub_is_num = False
+    sub_num = 0
+    sub_str = ""
+    
+    if has_sub:
+        sub_val = parts[2].strip()
+        if sub_val.isdigit():
+            sub_is_num = True
+            sub_num = int(sub_val)
+        else:
+            sub_str = sub_val.upper()
+            
+    return (prefix, num, 1 if has_sub else 0, 0 if sub_is_num else 1, sub_num, sub_str)
+
 @router.get("/", response=PaginatedParcelaSchema)
 def listar_parcelas(request, page: int = 1, limit: int = 20):
     import math
 
-    queryset = Parcela.objects.all().order_by('numero_lote')
-    total = queryset.count()
+    todos_lotes = list(Parcela.objects.all())
+    todos_lotes.sort(key=clave_orden_lote)
+    
+    total = len(todos_lotes)
     pages = math.ceil(total / limit) if limit > 0 else 1
     offset = (page - 1) * limit
     
-    parcelas = list(queryset[offset:offset+limit])
+    parcelas = todos_lotes[offset:offset+limit]
     contratos = list(Contrato.objects.filter(estado='activo').select_related('cliente'))
     contratos_map = {c.parcela_id: c for c in contratos}
 
@@ -25,9 +51,7 @@ def listar_parcelas(request, page: int = 1, limit: int = 20):
         contrato = contratos_map.get(p.id)
         if contrato:
             owner = contrato.cliente.nombre_completo
-            # Total esperado en cuotas (asumiendo cuotas iguales) = cuotas * monto
             total_cuotas_esperado = contrato.total_cuotas * contrato.installment_value
-            # Pagos realizados = Total esperado - saldo pendiente
             pagos_realizados = float(total_cuotas_esperado) - float(contrato.saldo_pendiente)
             abono = float(contrato.pie_inicial) + pagos_realizados
             saldo = float(contrato.saldo_pendiente)
