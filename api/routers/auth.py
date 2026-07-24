@@ -22,6 +22,23 @@ ADMIN_EMAILS_PREDETERMINADOS = [
     "tolteninmobiliaria13@gmail.com"
 ]
 
+def get_request_email(request) -> str:
+    email = request.headers.get("X-User-Email") or request.headers.get("x-user-email")
+    if not email:
+        raise HttpError(403, "Acceso denegado. Se requiere autenticación válida.")
+    return email.strip().lower()
+
+def verify_admin_access(request) -> str:
+    email = get_request_email(request)
+    is_admin = UsuarioPermitido.objects.filter(
+        email__iexact=email,
+        rol='admin',
+        activo=True
+    ).exists()
+    if not is_admin:
+        raise HttpError(403, "Acceso denegado. Se requieren permisos de Administrador activo.")
+    return email
+
 @router.get("/check", response=CheckAuthOut)
 def check_auth(request, email: str):
     clean_email = email.strip().lower()
@@ -85,6 +102,11 @@ def check_auth(request, email: str):
 
 @router.get("/notifications", response=NotificationsSummaryOut)
 def get_notifications(request):
+    # Validar que el usuario que consulta notificaciones esté autorizado
+    request_email = get_request_email(request)
+    if not UsuarioPermitido.objects.filter(email__iexact=request_email, activo=True).exists():
+        raise HttpError(403, "Acceso denegado. Usuario no autorizado.")
+
     # 1. Usuarios pendientes de aprobación
     usuarios_pendientes = list(UsuarioPermitido.objects.filter(activo=False).order_by('-fecha_registro'))
     pending_items = [
@@ -130,6 +152,8 @@ def get_notifications(request):
 
 @router.get("/usuarios", response=List[UsuarioPermitidoSchema])
 def list_usuarios(request):
+    verify_admin_access(request)
+    
     # Asegurar correos admin creados
     for admin_email in ADMIN_EMAILS_PREDETERMINADOS:
         UsuarioPermitido.objects.get_or_create(
@@ -145,6 +169,8 @@ def list_usuarios(request):
 
 @router.post("/usuarios", response=UsuarioPermitidoSchema)
 def create_usuario(request, payload: UsuarioPermitidoInSchema):
+    verify_admin_access(request)
+    
     clean_email = payload.email.strip().lower()
     user, created = UsuarioPermitido.objects.get_or_create(
         email__iexact=clean_email,
@@ -164,6 +190,8 @@ def create_usuario(request, payload: UsuarioPermitidoInSchema):
 
 @router.patch("/usuarios/{user_id}", response=UsuarioPermitidoSchema)
 def update_usuario(request, user_id: UUID, payload: UsuarioPermitidoUpdateSchema):
+    verify_admin_access(request)
+    
     user = get_object_or_404(UsuarioPermitido, id=user_id)
     
     # Proteger administradores predefinidos
@@ -184,6 +212,8 @@ def update_usuario(request, user_id: UUID, payload: UsuarioPermitidoUpdateSchema
 
 @router.delete("/usuarios/{user_id}")
 def delete_usuario(request, user_id: UUID):
+    verify_admin_access(request)
+    
     user = get_object_or_404(UsuarioPermitido, id=user_id)
     
     # Proteger administradores predefinidos
