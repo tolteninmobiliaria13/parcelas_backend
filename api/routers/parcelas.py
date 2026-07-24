@@ -153,7 +153,8 @@ def asignar_propietario(request, lote_id: str, payload: AsignarPropietarioInSche
         "abono": abono_total,
         "saldo": saldo_total,
         "status": "current",
-        "subdivision": parcela.subdivision
+        "subdivision": parcela.subdivision,
+        "estado": parcela.estado
     }
 
 @router.put("/{lote_id}", response={200: ParcelaCompletaSchema})
