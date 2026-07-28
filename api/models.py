@@ -30,6 +30,8 @@ class Parcela(models.Model):
     superficie_m2 = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     precio_base = models.DecimalField(max_digits=12, decimal_places=2)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='disponible')
+    en_papelera = models.BooleanField(default=False)
+    fecha_eliminacion = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.numero_lote} - {self.subdivision}"

@@ -12,15 +12,17 @@ def obtener_dashboard_stats(request):
     today = date.today()
     # total_por_pagar: cuotas del mes actual que aún no han sido pagadas
     unpaid_this_month = Pago.objects.filter(
+        contrato__parcela__en_papelera=False,
         estado__in=['pendiente', 'vencido'],
         fecha_vencimiento__year=today.year,
         fecha_vencimiento__month=today.month,
     )
     total_por_pagar = unpaid_this_month.aggregate(total=Sum('monto_cobrar'))['total'] or 0.0
     paid_this_month = Pago.objects.filter(
+        contrato__parcela__en_papelera=False,
         estado='pagado', 
-        fecha_pago_real__year=today.year, 
-        fecha_pago_real__month=today.month
+        fecha_vencimiento__year=today.year, 
+        fecha_vencimiento__month=today.month
     )
     total_pagado_mes = paid_this_month.aggregate(total=Sum('monto_cobrar'))['total'] or 0.0
 
@@ -28,6 +30,8 @@ def obtener_dashboard_stats(request):
     from django.db.models import Q
     lotes_con_deuda = (
         Contrato.objects.filter(
+            parcela__en_papelera=False
+        ).filter(
             Q(pagos__estado='vencido') |
             Q(pagos__estado='pendiente', pagos__fecha_vencimiento__lt=today)
         )
@@ -38,6 +42,7 @@ def obtener_dashboard_stats(request):
 
     # proximos_vencimientos: cantidad de cuotas pendientes que vencen en el mes actual y no están vencidas
     proximos_vencimientos = Pago.objects.filter(
+        contrato__parcela__en_papelera=False,
         estado='pendiente', 
         fecha_vencimiento__year=today.year, 
         fecha_vencimiento__month=today.month,
@@ -79,7 +84,7 @@ def clave_orden_lote_contrato(c: Contrato):
 def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
     import math
 
-    todos_contratos = list(Contrato.objects.select_related('cliente', 'parcela').all())
+    todos_contratos = list(Contrato.objects.filter(parcela__en_papelera=False).select_related('cliente', 'parcela').all())
     todos_contratos.sort(key=clave_orden_lote_contrato)
     
     total = len(todos_contratos)

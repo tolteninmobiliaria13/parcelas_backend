@@ -45,7 +45,7 @@ def obtener_vencimientos(request, year: int = 2025):
     from collections import defaultdict
     from django.db.models import Count
 
-    contratos = list(Contrato.objects.select_related('cliente', 'parcela').all())
+    contratos = list(Contrato.objects.filter(parcela__en_papelera=False).select_related('cliente', 'parcela').all())
     contratos.sort(key=clave_orden_lote_contrato)
     contrato_ids = [c.id for c in contratos]
 
@@ -162,7 +162,7 @@ def actualizar_pago(request, pago_id: str, payload: PagoUpdateSchema):
             raise HttpError(400, "Estado inválido")
         pago.estado = payload.estado
         if payload.estado == 'pagado' and not pago.fecha_pago_real:
-            pago.fecha_pago_real = date.today()
+            pago.fecha_pago_real = pago.fecha_vencimiento
         elif payload.estado != 'pagado':
             pago.fecha_pago_real = None
             

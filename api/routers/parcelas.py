@@ -35,7 +35,7 @@ def clave_orden_lote(p: Parcela):
 def listar_parcelas(request, page: int = 1, limit: int = 20):
     import math
 
-    todos_lotes = list(Parcela.objects.all())
+    todos_lotes = list(Parcela.objects.filter(en_papelera=False))
     todos_lotes.sort(key=clave_orden_lote)
     
     total = len(todos_lotes)
@@ -80,6 +80,50 @@ def listar_parcelas(request, page: int = 1, limit: int = 20):
         "page": page,
         "pages": pages
     }
+
+class ParcelaPapeleraSchema(Schema):
+    id: str
+    numero_lote: str
+    subdivision: str
+    owner: str
+    precio_base: float
+    fecha_eliminacion: str | None = None
+
+class MessageResponseSchema(Schema):
+    success: bool
+    message: str
+
+def get_parcela_by_id_or_lote(lote_id: str):
+    from django.db.models import Q
+    from ninja.errors import HttpError
+    parcela = Parcela.objects.filter(Q(id=lote_id) if len(lote_id) == 36 else Q(numero_lote=lote_id)).first()
+    if not parcela:
+        raise HttpError(404, f"Parcela {lote_id} no encontrada.")
+    return parcela
+
+@router.get("/papelera", response=List[ParcelaPapeleraSchema])
+def listar_papelera(request):
+    todos_papelera = list(Parcela.objects.filter(en_papelera=True))
+    todos_papelera.sort(key=clave_orden_lote)
+    
+    contratos = list(Contrato.objects.all().select_related('cliente'))
+    contratos_map = {c.parcela_id: c for c in contratos}
+
+    resultado = []
+    for p in todos_papelera:
+        contrato = contratos_map.get(p.id)
+        owner = contrato.cliente.nombre_completo if contrato else "Sin Asignar"
+        fecha_elim_str = p.fecha_eliminacion.strftime("%d/%m/%Y %H:%M") if p.fecha_eliminacion else None
+        
+        resultado.append({
+            "id": str(p.id),
+            "numero_lote": p.numero_lote,
+            "subdivision": p.subdivision,
+            "owner": owner,
+            "precio_base": float(p.precio_base),
+            "fecha_eliminacion": fecha_elim_str
+        })
+    return resultado
 
 @router.post("/", response={201: ParcelaCompletaSchema})
 def crear_parcela(request, payload: ParcelaInSchema):
@@ -154,7 +198,7 @@ def asignar_propietario(request, lote_id: str, payload: AsignarPropietarioInSche
     for i in range(1, payload.total_cuotas + 1):
         fecha_vencimiento = sumar_meses(payload.fecha_pago, i - 1)
         pago_estado = 'pagado' if i <= cuotas_pagadas else 'pendiente'
-        fecha_pago_real = payload.fecha_pago if i <= cuotas_pagadas else None
+        fecha_pago_real = fecha_vencimiento if i <= cuotas_pagadas else None
         
         Pago.objects.create(
             contrato=contrato,
@@ -223,18 +267,6 @@ def editar_parcela(request, lote_id: str, payload: ParcelaInSchema):
         "estado": parcela.estado
     }
 
-@router.delete("/{lote_id}")
-def eliminar_parcela(request, lote_id: str):
-    from django.shortcuts import get_object_or_404
-    from ninja.errors import HttpError
-    from django.db.models.deletion import ProtectedError
-    
-    parcela = get_object_or_404(Parcela, numero_lote=lote_id)
-    try:
-        parcela.delete()
-    except ProtectedError:
-        raise HttpError(400, "No se puede eliminar una parcela que tiene un contrato activo o registros asociados.")
-    return {"success": True}
 
 @router.post("/clientes/crear", response={201: ClienteSchema})
 def crear_cliente_api(request, payload: ClienteInSchema):
@@ -300,7 +332,7 @@ def editar_contrato(request, lote_id: str, payload: AsignarPropietarioInSchema):
     for i in range(1, payload.total_cuotas + 1):
         fecha_vencimiento = sumar_meses(payload.fecha_pago, i - 1)
         pago_estado = 'pagado' if i <= cuotas_pagadas else 'pendiente'
-        fecha_pago_real = payload.fecha_pago if i <= cuotas_pagadas else None
+        fecha_pago_real = fecha_vencimiento if i <= cuotas_pagadas else None
         
         Pago.objects.create(
             contrato=contrato,
@@ -360,6 +392,47 @@ def obtener_contrato_detalle(request, lote_id: str):
         "monto_cuota": monto_cuota,
         "cuotas_pagadas": cuotas_pagadas
     }
+
+
+@router.delete("/{lote_id}", response=MessageResponseSchema)
+def mover_a_papelera(request, lote_id: str):
+    from django.utils import timezone
+    parcela = get_parcela_by_id_or_lote(lote_id)
+    parcela.en_papelera = True
+    parcela.fecha_eliminacion = timezone.now()
+    parcela.save()
+    return {"success": True, "message": f"La parcela {parcela.numero_lote} fue movida a la papelera."}
+
+@router.put("/{lote_id}/restaurar", response=MessageResponseSchema)
+def restaurar_de_papelera(request, lote_id: str):
+    parcela = get_parcela_by_id_or_lote(lote_id)
+    parcela.en_papelera = False
+    parcela.fecha_eliminacion = None
+    parcela.save()
+    return {"success": True, "message": f"La parcela {parcela.numero_lote} ha sido restaurada."}
+
+@router.delete("/{lote_id}/definitivo", response=MessageResponseSchema)
+def eliminar_definitivamente(request, lote_id: str):
+    from django.db import transaction
+    from django.db.models.signals import post_delete
+    from ..models import update_contrato_cache
+
+    parcela = get_parcela_by_id_or_lote(lote_id)
+    lote_num = parcela.numero_lote
+
+    with transaction.atomic():
+        # Desconectar temporalmente la señal para evitar recálculos redundantes en bucle por cada cuota
+        post_delete.disconnect(update_contrato_cache, sender=Pago)
+        try:
+            contratos = Contrato.objects.filter(parcela=parcela)
+            Pago.objects.filter(contrato__in=contratos).delete()
+            contratos.delete()
+            parcela.delete()
+        finally:
+            post_delete.connect(update_contrato_cache, sender=Pago)
+
+    return {"success": True, "message": f"La parcela {lote_num} y sus datos asociados fueron eliminados definitivamente."}
+
 
 
 
