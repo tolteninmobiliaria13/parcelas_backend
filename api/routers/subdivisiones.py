@@ -8,7 +8,6 @@ from ..schemas.subdivisiones import SubdivisionSchema, SubdivisionInSchema
 router = Router()
 
 @router.get("", response=List[SubdivisionSchema])
-@router.get("/", response=List[SubdivisionSchema])
 def listar_subdivisiones(request):
     subdivisiones = list(Subdivision.objects.all())
     subdivisiones.sort(key=lambda s: (s.numero if s.numero is not None else 999999, s.nombre.lower()))
@@ -22,8 +21,11 @@ def listar_subdivisiones(request):
         })
     return resultado
 
+@router.get("/", response=List[SubdivisionSchema])
+def listar_subdivisiones_slash(request):
+    return listar_subdivisiones(request)
+
 @router.post("", response={201: SubdivisionSchema})
-@router.post("/", response={201: SubdivisionSchema})
 def crear_subdivision(request, payload: SubdivisionInSchema):
     nombre_clean = payload.nombre.strip()
     if not nombre_clean:
@@ -47,6 +49,10 @@ def crear_subdivision(request, payload: SubdivisionInSchema):
         "numero": sub.numero,
         "nombre": sub.nombre,
     }
+
+@router.post("/", response={201: SubdivisionSchema})
+def crear_subdivision_slash(request, payload: SubdivisionInSchema):
+    return crear_subdivision(request, payload)
 
 @router.put("/{subdivision_id}", response={200: SubdivisionSchema})
 def editar_subdivision(request, subdivision_id: str, payload: SubdivisionInSchema):
