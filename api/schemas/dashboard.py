@@ -18,6 +18,8 @@ class LotSchema(Schema):
     installmentValue: float
     nextDueDate: Optional[str] = None
     status: str
+    overdueCount: int = 0
+    overdueBalance: float = 0.0
     lastPaymentDate: Optional[str] = None
     paymentMethod: Optional[str] = None
 

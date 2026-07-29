@@ -84,7 +84,17 @@ def clave_orden_lote_contrato(c: Contrato):
 def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
     import math
 
-    todos_contratos = list(Contrato.objects.filter(parcela__en_papelera=False).select_related('cliente', 'parcela').all())
+    from django.db.models import Count, Sum, Q
+
+    todos_contratos = list(
+        Contrato.objects.filter(parcela__en_papelera=False)
+        .select_related('cliente', 'parcela')
+        .annotate(
+            overdue_cnt=Count('pagos', filter=Q(pagos__estado='vencido')),
+            overdue_bal=Sum('pagos__monto_cobrar', filter=Q(pagos__estado='vencido'))
+        )
+        .all()
+    )
     todos_contratos.sort(key=clave_orden_lote_contrato)
     
     total = len(todos_contratos)
@@ -109,6 +119,8 @@ def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
             "installmentValue": float(c.installment_value),
             "nextDueDate": next_due_date,
             "status": c.estado_calculado,
+            "overdueCount": getattr(c, 'overdue_cnt', 0),
+            "overdueBalance": float(getattr(c, 'overdue_bal', 0) or 0.0),
             "lastPaymentDate": last_payment_date,
             "paymentMethod": "Transferencia"
         })
