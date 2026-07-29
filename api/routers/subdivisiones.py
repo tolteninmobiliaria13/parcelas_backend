@@ -8,6 +8,7 @@ from ..schemas.subdivisiones import SubdivisionSchema, SubdivisionInSchema
 router = Router()
 
 @router.get("", response=List[SubdivisionSchema])
+@router.get("/", response=List[SubdivisionSchema])
 def listar_subdivisiones(request):
     subdivisiones = list(Subdivision.objects.all())
     subdivisiones.sort(key=lambda s: (s.numero if s.numero is not None else 999999, s.nombre.lower()))
@@ -22,6 +23,7 @@ def listar_subdivisiones(request):
     return resultado
 
 @router.post("", response={201: SubdivisionSchema})
+@router.post("/", response={201: SubdivisionSchema})
 def crear_subdivision(request, payload: SubdivisionInSchema):
     nombre_clean = payload.nombre.strip()
     if not nombre_clean:
