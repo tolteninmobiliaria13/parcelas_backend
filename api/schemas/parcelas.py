@@ -8,6 +8,7 @@ class AsignarPropietarioInSchema(Schema):
     cliente_email: Optional[str] = None
     cliente_telefono: Optional[str] = None
     fecha_pago: date
+    fecha_firma: Optional[date] = None
     pie_inicial: float
     total_cuotas: int
     monto_cuota: float

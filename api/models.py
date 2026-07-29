@@ -16,6 +16,20 @@ class Cliente(models.Model):
     class Meta:
         db_table = 'clientes'
 
+class Subdivision(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    numero = models.IntegerField(unique=True, null=True, blank=True)
+    nombre = models.CharField(max_length=100)
+    descripcion = models.TextField(null=True, blank=True)
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Loteo {self.numero} - {self.nombre}" if self.numero else self.nombre
+
+    class Meta:
+        db_table = 'subdivisiones'
+        ordering = ['numero', 'nombre']
+
 class Parcela(models.Model):
     ESTADO_CHOICES = [
         ('disponible', 'Disponible'),
@@ -27,6 +41,7 @@ class Parcela(models.Model):
     # numero_rol y superficie_m2 ahora permiten nulos
     numero_rol = models.CharField(max_length=50, null=True, blank=True)
     subdivision = models.CharField(max_length=100)
+    subdivision_ref = models.ForeignKey(Subdivision, on_delete=models.SET_NULL, null=True, blank=True)
     superficie_m2 = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     precio_base = models.DecimalField(max_digits=12, decimal_places=2)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='disponible')
@@ -49,6 +64,7 @@ class Contrato(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.RESTRICT)
     parcela = models.ForeignKey(Parcela, on_delete=models.RESTRICT)
     fecha_pago = models.DateField()
+    fecha_firma = models.DateField(null=True, blank=True)
     pie_inicial = models.DecimalField(max_digits=12, decimal_places=2)
     total_cuotas = models.IntegerField()
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='activo')

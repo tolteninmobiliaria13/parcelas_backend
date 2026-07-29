@@ -189,6 +189,7 @@ def asignar_propietario(request, lote_id: str, payload: AsignarPropietarioInSche
         cliente=cliente,
         parcela=parcela,
         fecha_pago=payload.fecha_pago,
+        fecha_firma=payload.fecha_firma or payload.fecha_pago,
         pie_inicial=payload.pie_inicial,
         total_cuotas=payload.total_cuotas,
         estado='activo'
@@ -323,6 +324,7 @@ def editar_contrato(request, lote_id: str, payload: AsignarPropietarioInSchema):
             contrato.cliente = cliente
             
     contrato.fecha_pago = payload.fecha_pago
+    contrato.fecha_firma = payload.fecha_firma or payload.fecha_pago
     contrato.pie_inicial = payload.pie_inicial
     contrato.total_cuotas = payload.total_cuotas
     contrato.save()
@@ -363,6 +365,7 @@ class ContratoDetalleSchema(Schema):
     cliente_id: str
     cliente_nombre: str
     fecha_pago: date
+    fecha_firma: Optional[date] = None
     pie_inicial: float
     total_cuotas: int
     monto_cuota: float
@@ -387,6 +390,7 @@ def obtener_contrato_detalle(request, lote_id: str):
         "cliente_id": str(contrato.cliente.id),
         "cliente_nombre": contrato.cliente.nombre_completo,
         "fecha_pago": contrato.fecha_pago,
+        "fecha_firma": contrato.fecha_firma or contrato.fecha_pago,
         "pie_inicial": float(contrato.pie_inicial),
         "total_cuotas": contrato.total_cuotas,
         "monto_cuota": monto_cuota,
