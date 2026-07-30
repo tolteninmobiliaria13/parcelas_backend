@@ -218,10 +218,11 @@ def obtener_datos_reporte_mes_actual():
     cobranza_corriente = 0.0
     recuperacion_mora = 0.0
     
-    # Contadores para el Estado de Cobranza
+    # Contadores para el Estado de Cobranza (4 categorías)
     estado_lotes = {
         "Al día": {"count": 0, "monto": 0.0},
         "Vencidos": {"count": 0, "monto": 0.0},
+        "Pendientes": {"count": 0, "monto": 0.0},
         "En mora": {"count": 0, "monto": 0.0},
     }
     
@@ -254,24 +255,32 @@ def obtener_datos_reporte_mes_actual():
             
         # === 2. Lógica para Detalle de Cartera y Estado de Cobranza ===
         
-        # Determinar el estado global del lote basado en cuotas vencidas/pendientes
-        # Cuotas impagas pasadas o actuales
-        cuotas_impagas = [
+        # Cuotas impagas de MESES ANTERIORES (En mora)
+        cuotas_mora = [
             p for p in pagos 
-            if (p['estado'] == 'vencido') or (p['estado'] == 'pendiente' and p['fecha_vencimiento'] < today)
+            if p['estado'] != 'pagado' and (
+                p['fecha_vencimiento'].year < year or 
+                (p['fecha_vencimiento'].year == year and p['fecha_vencimiento'].month < month)
+            )
         ]
         
-        deuda_total_lote = sum(float(p['monto_cobrar']) for p in cuotas_impagas)
-        
-        if len(cuotas_impagas) == 0:
-            estado_lote_str = "Al día"
-        elif len(cuotas_impagas) == 1:
-            estado_lote_str = "Vencidos"  # o "Vencido"
-        else:
+        if len(cuotas_mora) > 0:
             estado_lote_str = "En mora"
+            deuda_total_lote = sum(float(p['monto_cobrar']) for p in cuotas_mora)
+            if pago_mes and pago_mes['estado'] != 'pagado':
+                deuda_total_lote += float(pago_mes['monto_cobrar'])
+        elif pago_mes and pago_mes['estado'] != 'pagado':
+            deuda_total_lote = float(pago_mes['monto_cobrar'])
+            if pago_mes['fecha_vencimiento'] < today:
+                estado_lote_str = "Vencidos"
+            else:
+                estado_lote_str = "Pendientes"
+        else:
+            estado_lote_str = "Al día"
+            deuda_total_lote = 0.0
             
         estado_lotes[estado_lote_str]["count"] += 1
-        estado_lotes[estado_lote_str]["monto"] += deuda_total_lote if deuda_total_lote > 0 else (float(pago_mes['monto_cobrar']) if pago_mes else 0)
+        estado_lotes[estado_lote_str]["monto"] += deuda_total_lote
         
         # Próximo Vencimiento (la primera cuota pendiente)
         prox_vencimiento = next((p['fecha_vencimiento'] for p in pagos if p['estado'] == 'pendiente' or p['estado'] == 'vencido'), None)
@@ -304,7 +313,7 @@ def obtener_datos_reporte_mes_actual():
     
     # === Cálculos Finales Resumen Ejecutivo ===
     cobranza_efectiva = cobranza_corriente + recuperacion_mora
-    cuentas_por_cobrar = facturacion_periodo - cobranza_corriente
+    cuentas_por_cobrar = estado_lotes["Vencidos"]["monto"] + estado_lotes["Pendientes"]["monto"] + estado_lotes["En mora"]["monto"]
     
     # === Formateo de Estado de Cobranza ===
     estado_cobranza = [
@@ -317,6 +326,11 @@ def obtener_datos_reporte_mes_actual():
             "estado": "Vencidos",
             "lotes": estado_lotes["Vencidos"]["count"],
             "monto_fmt": format_clp(estado_lotes["Vencidos"]["monto"])
+        },
+        {
+            "estado": "Pendientes",
+            "lotes": estado_lotes["Pendientes"]["count"],
+            "monto_fmt": format_clp(estado_lotes["Pendientes"]["monto"])
         },
         {
             "estado": "En mora",
