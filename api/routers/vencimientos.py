@@ -193,11 +193,11 @@ def format_clp(amount):
     return f"$ {formatted}"
 
 
-def obtener_datos_reporte_mes_actual():
+def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_year: Optional[int] = None):
     from collections import defaultdict
     today = date.today()
-    month = today.month
-    year = today.year
+    month = target_month if (target_month is not None and 1 <= target_month <= 12) else today.month
+    year = target_year if (target_year is not None and target_year > 2000) else today.year
     fecha_emision = today.strftime("%d-%m-%Y")
     mes_str = SPANISH_MONTHS.get(month, 'Enero')
     periodo_str = f"{mes_str} {year}"
@@ -294,11 +294,14 @@ def obtener_datos_reporte_mes_actual():
         else:
             ultimo_pago_str = "-"
             
+        valor_cuota_val = float(c.installment_value) if c.installment_value else (float(pagos[0]['monto_cobrar']) if pagos else 0.0)
+        
         detalles.append({
             "numero_lote": c.parcela.numero_lote,
             "propietario": c.cliente.nombre_completo,
             "estado": estado_lote_str,
             "saldo_fmt": format_clp(deuda_total_lote),
+            "monto_cuota_fmt": format_clp(valor_cuota_val),
             "proximo_vencimiento": prox_vencimiento_str,
             "ultimo_pago": ultimo_pago_str
         })
@@ -373,8 +376,8 @@ def obtener_datos_reporte_mes_actual():
 
 
 @router.get("/reporte-data")
-def obtener_reporte_data(request):
-    return obtener_datos_reporte_mes_actual()
+def obtener_reporte_data(request, month: Optional[int] = None, year: Optional[int] = None):
+    return obtener_datos_reporte_mes_actual(target_month=month, target_year=year)
 
 
 @router.get("/reporte")
