@@ -45,7 +45,7 @@ def obtener_vencimientos(request, year: int = 2025):
     from collections import defaultdict
     from django.db.models import Count
 
-    contratos = list(Contrato.objects.filter(parcela__en_papelera=False).select_related('cliente', 'parcela').all())
+    contratos = list(Contrato.objects.filter(estado='activo', parcela__en_papelera=False).select_related('cliente', 'parcela').all())
     contratos.sort(key=clave_orden_lote_contrato)
     contrato_ids = [c.id for c in contratos]
 
@@ -202,7 +202,7 @@ def obtener_datos_reporte_mes_actual():
     mes_str = SPANISH_MONTHS.get(month, 'Enero')
     periodo_str = f"{mes_str} {year}"
     
-    contratos = Contrato.objects.select_related('cliente', 'parcela').all()
+    contratos = Contrato.objects.filter(estado='activo', parcela__en_papelera=False).select_related('cliente', 'parcela').all()
     
     # Fetch all payments as dicts to avoid instantiating thousands of Django models (10x faster)
     pagos_all = Pago.objects.values(

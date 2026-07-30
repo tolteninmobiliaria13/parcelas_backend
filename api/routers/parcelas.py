@@ -1,5 +1,5 @@
 from ninja import Router, Schema
-from typing import List
+from typing import List, Optional
 from django.db.models import Sum
 from ..models import Parcela, Contrato, Cliente, Pago
 from ..schemas.parcelas import ParcelaCompletaSchema, ParcelaInSchema, AsignarPropietarioInSchema, PaginatedParcelaSchema
@@ -185,6 +185,9 @@ def asignar_propietario(request, lote_id: str, payload: AsignarPropietarioInSche
     parcela.estado = 'vendida'
     parcela.save()
     
+    # Desactivar cualquier contrato activo previo para esta parcela
+    Contrato.objects.filter(parcela=parcela, estado='activo').update(estado='finalizado')
+
     contrato = Contrato.objects.create(
         cliente=cliente,
         parcela=parcela,
