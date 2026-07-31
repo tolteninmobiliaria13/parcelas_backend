@@ -13,6 +13,7 @@ class AsignarPropietarioInSchema(Schema):
     total_cuotas: int
     monto_cuota: float
     cuotas_pagadas: Optional[int] = 0
+    tipo_pago: Optional[str] = 'credito'
 
 class ParcelaInSchema(Schema):
     numero_lote: str

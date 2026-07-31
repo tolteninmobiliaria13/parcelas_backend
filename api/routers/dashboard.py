@@ -22,7 +22,9 @@ def obtener_dashboard_stats(request):
         contrato__parcela__en_papelera=False,
         estado='pagado', 
         fecha_vencimiento__year=today.year, 
-        fecha_vencimiento__month=today.month
+        fecha_vencimiento__month=today.month,
+        fecha_pago_real__year=today.year,
+        fecha_pago_real__month=today.month
     )
     total_pagado_mes = paid_this_month.aggregate(total=Sum('monto_cobrar'))['total'] or 0.0
 
@@ -83,15 +85,17 @@ def clave_orden_lote_contrato(c: Contrato):
 @router.get("/lots", response=PaginatedLotSchema)
 def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
     import math
-
+    from datetime import date
     from django.db.models import Count, Sum, Q
+
+    today = date.today()
 
     todos_contratos = list(
         Contrato.objects.filter(parcela__en_papelera=False)
         .select_related('cliente', 'parcela')
         .annotate(
-            overdue_cnt=Count('pagos', filter=Q(pagos__estado='vencido')),
-            overdue_bal=Sum('pagos__monto_cobrar', filter=Q(pagos__estado='vencido'))
+            overdue_cnt=Count('pagos', filter=Q(pagos__estado='vencido') | (Q(pagos__estado='pendiente') & Q(pagos__fecha_vencimiento__lt=today))),
+            overdue_bal=Sum('pagos__monto_cobrar', filter=Q(pagos__estado='vencido') | (Q(pagos__estado='pendiente') & Q(pagos__fecha_vencimiento__lt=today)))
         )
         .all()
     )
