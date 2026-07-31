@@ -217,6 +217,7 @@ def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_
     facturacion_periodo = 0.0
     cobranza_corriente = 0.0
     recuperacion_mora = 0.0
+    pagos_adelantados = 0.0
     
     # Contadores para el Estado de Cobranza (4 categorías)
     estado_lotes = {
@@ -228,6 +229,9 @@ def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_
     
     detalles = []
     
+    desglose_pagos_atrasados = []
+    desglose_pagos_adelantados = []
+    
     for c in contratos:
         pagos = pagos_por_contrato[c.id]
         
@@ -236,7 +240,19 @@ def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_
         # Pagos que VENCEN este mes (Facturación del período)
         pago_mes = next((p for p in pagos if p['fecha_vencimiento'].month == month and p['fecha_vencimiento'].year == year), None)
         if pago_mes:
-            facturacion_periodo += float(pago_mes['monto_cobrar'])
+            # Si el pago vencía este mes pero fue pagado en un MES ANTERIOR, no se considera en el total esperado del mes
+            pagado_en_mes_anterior = (
+                pago_mes['estado'] == 'pagado'
+                and pago_mes['fecha_pago_real']
+                and (
+                    pago_mes['fecha_pago_real'].year < year or 
+                    (pago_mes['fecha_pago_real'].year == year and pago_mes['fecha_pago_real'].month < month)
+                )
+            )
+            
+            if not pagado_en_mes_anterior:
+                facturacion_periodo += float(pago_mes['monto_cobrar'])
+                
             if pago_mes['estado'] == 'pagado' and pago_mes['fecha_pago_real'] and pago_mes['fecha_pago_real'].month == month and pago_mes['fecha_pago_real'].year == year:
                 cobranza_corriente += float(pago_mes['monto_cobrar'])
                 
@@ -251,7 +267,22 @@ def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_
         ]
         
         for p_extra in pagos_otros_meses_pagados_este_mes:
-            recuperacion_mora += float(p_extra['monto_cobrar'])
+            monto = float(p_extra['monto_cobrar'])
+            item_info = {
+                "lote": c.parcela.numero_lote,
+                "cliente": c.cliente.nombre_completo,
+                "vencimiento": p_extra['fecha_vencimiento'].strftime("%d-%m-%Y"),
+                "fecha_pago": p_extra['fecha_pago_real'].strftime("%d-%m-%Y") if p_extra['fecha_pago_real'] else "-",
+                "monto_fmt": format_clp(monto)
+            }
+            # Si el vencimiento era previo al mes actual => Pago Atrasado (Recuperación de Mora)
+            if p_extra['fecha_vencimiento'].year < year or (p_extra['fecha_vencimiento'].year == year and p_extra['fecha_vencimiento'].month < month):
+                recuperacion_mora += monto
+                desglose_pagos_atrasados.append(item_info)
+            # Si el vencimiento es posterior al mes actual => Pago Adelantado
+            elif p_extra['fecha_vencimiento'].year > year or (p_extra['fecha_vencimiento'].year == year and p_extra['fecha_vencimiento'].month > month):
+                pagos_adelantados += monto
+                desglose_pagos_adelantados.append(item_info)
             
         # === 2. Lógica para Detalle de Cartera y Estado de Cobranza ===
         
@@ -296,10 +327,31 @@ def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_
             
         valor_cuota_val = float(c.installment_value) if c.installment_value else (float(pagos[0]['monto_cobrar']) if pagos else 0.0)
         
+        # Estado de la cuota del mes para el informe operativo
+        estado_cuota_mes = "SIN_CUOTA"
+        fecha_pago_cuota_mes_str = "-"
+        
+        if pago_mes:
+            if pago_mes['estado'] == 'pagado' and pago_mes['fecha_pago_real']:
+                p_real = pago_mes['fecha_pago_real']
+                fecha_pago_cuota_mes_str = p_real.strftime("%d-%m-%Y")
+                if p_real.month == month and p_real.year == year:
+                    estado_cuota_mes = "PAGADO_CORRIENTE"
+                elif p_real.year < year or (p_real.year == year and p_real.month < month):
+                    estado_cuota_mes = "PAGADO_ANTICIPADO"
+                else:
+                    estado_cuota_mes = "VENCIDO_O_IMPAGO_EN_MES"
+            else:
+                estado_cuota_mes = "VENCIDO_O_IMPAGO_EN_MES"
+
         detalles.append({
             "numero_lote": c.parcela.numero_lote,
             "propietario": c.cliente.nombre_completo,
             "estado": estado_lote_str,
+            "estado_cuota_mes": estado_cuota_mes,
+            "fecha_pago_cuota_mes": fecha_pago_cuota_mes_str,
+            "tiene_cuota_mes": bool(pago_mes),
+            "monto_cuota_mes_fmt": format_clp(float(pago_mes['monto_cobrar'])) if pago_mes else "$ 0",
             "saldo_fmt": format_clp(deuda_total_lote),
             "monto_cuota_fmt": format_clp(valor_cuota_val),
             "proximo_vencimiento": prox_vencimiento_str,
@@ -315,7 +367,7 @@ def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_
     detalles.sort(key=extraer_numero)
     
     # === Cálculos Finales Resumen Ejecutivo ===
-    cobranza_efectiva = cobranza_corriente + recuperacion_mora
+    cobranza_efectiva = cobranza_corriente + recuperacion_mora + pagos_adelantados
     cuentas_por_cobrar = estado_lotes["Vencidos"]["monto"] + estado_lotes["Pendientes"]["monto"] + estado_lotes["En mora"]["monto"]
     
     # === Formateo de Estado de Cobranza ===
@@ -349,6 +401,11 @@ def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_
         "facturacion_periodo_fmt": format_clp(facturacion_periodo),
         "cobranza_efectiva_fmt": format_clp(cobranza_efectiva),
         "recuperacion_mora_fmt": format_clp(recuperacion_mora),
+        "recuperacion_mora_val": recuperacion_mora,
+        "desglose_pagos_atrasados": desglose_pagos_atrasados,
+        "pagos_adelantados_fmt": format_clp(pagos_adelantados),
+        "pagos_adelantados_val": pagos_adelantados,
+        "desglose_pagos_adelantados": desglose_pagos_adelantados,
         "cobranza_corriente_fmt": format_clp(cobranza_corriente),
         "cuentas_por_cobrar_fmt": format_clp(cuentas_por_cobrar),
     }

@@ -60,6 +60,10 @@ class Contrato(models.Model):
         ('finalizado', 'Finalizado'),
         ('incumplido', 'Incumplido'),
     ]
+    TIPO_PAGO_CHOICES = [
+        ('contado', 'Al Contado'),
+        ('credito', 'Con Cuotas'),
+    ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     cliente = models.ForeignKey(Cliente, on_delete=models.RESTRICT)
     parcela = models.ForeignKey(Parcela, on_delete=models.RESTRICT)
@@ -67,6 +71,7 @@ class Contrato(models.Model):
     fecha_firma = models.DateField(null=True, blank=True)
     pie_inicial = models.DecimalField(max_digits=12, decimal_places=2)
     total_cuotas = models.IntegerField()
+    tipo_pago = models.CharField(max_length=20, choices=TIPO_PAGO_CHOICES, default='credito')
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='activo')
 
     # Nuevos campos cacheados
@@ -123,16 +128,22 @@ class UsuarioPermitido(models.Model):
 # --- Signal y Helper de Recálculo ---
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
-from django.db.models import Sum, Min, Max
+from django.db.models import Sum, Min, Max, Q
+from datetime import date
 
 def recalcular_contrato(contrato_id):
+    contrato = Contrato.objects.filter(id=contrato_id).first()
+    if not contrato:
+        return
+
     pagos = Pago.objects.filter(contrato_id=contrato_id)
     if not pagos.exists():
+        estado_calc = 'current' if contrato.estado == 'activo' else 'inactive'
         Contrato.objects.filter(id=contrato_id).update(
             saldo_pendiente=0,
             proximo_vencimiento=None,
-            ultimo_pago=None,
-            estado_calculado='inactive',
+            ultimo_pago=contrato.fecha_pago,
+            estado_calculado=estado_calc,
             installment_value=0
         )
         return
@@ -151,14 +162,17 @@ def recalcular_contrato(contrato_id):
     inst_val = primera_cuota.monto_cobrar if primera_cuota else 0
 
     # Determinar estado
-    vencidos = pagos.filter(estado='vencido').count()
+    today = date.today()
+    vencidos = pagos.filter(
+        Q(estado='vencido') | (Q(estado='pendiente') & Q(fecha_vencimiento__lt=today))
+    ).count()
     pendientes = pagos.exclude(estado='pagado').count()
     if vencidos > 0:
         estado_calc = 'overdue'
     elif pendientes > 0:
         estado_calc = 'current'
     else:
-        estado_calc = 'inactive'
+        estado_calc = 'current' if contrato.estado == 'activo' else 'inactive'
 
     Contrato.objects.filter(id=contrato_id).update(
         saldo_pendiente=saldo,

@@ -188,6 +188,7 @@ def asignar_propietario(request, lote_id: str, payload: AsignarPropietarioInSche
     # Desactivar cualquier contrato activo previo para esta parcela
     Contrato.objects.filter(parcela=parcela, estado='activo').update(estado='finalizado')
 
+    tipo_pago_val = payload.tipo_pago if payload.tipo_pago in ['contado', 'credito'] else ('contado' if payload.total_cuotas <= 1 else 'credito')
     contrato = Contrato.objects.create(
         cliente=cliente,
         parcela=parcela,
@@ -195,6 +196,7 @@ def asignar_propietario(request, lote_id: str, payload: AsignarPropietarioInSche
         fecha_firma=payload.fecha_firma or payload.fecha_pago,
         pie_inicial=payload.pie_inicial,
         total_cuotas=payload.total_cuotas,
+        tipo_pago=tipo_pago_val,
         estado='activo'
     )
     
@@ -326,10 +328,12 @@ def editar_contrato(request, lote_id: str, payload: AsignarPropietarioInSchema):
             )
             contrato.cliente = cliente
             
+    tipo_pago_val = payload.tipo_pago if payload.tipo_pago in ['contado', 'credito'] else ('contado' if payload.total_cuotas <= 1 else 'credito')
     contrato.fecha_pago = payload.fecha_pago
     contrato.fecha_firma = payload.fecha_firma or payload.fecha_pago
     contrato.pie_inicial = payload.pie_inicial
     contrato.total_cuotas = payload.total_cuotas
+    contrato.tipo_pago = tipo_pago_val
     contrato.save()
     
     contrato.pagos.all().delete()
@@ -373,6 +377,7 @@ class ContratoDetalleSchema(Schema):
     total_cuotas: int
     monto_cuota: float
     cuotas_pagadas: int
+    tipo_pago: str
 
 @router.get("/{lote_id}/contrato", response={200: ContratoDetalleSchema})
 def obtener_contrato_detalle(request, lote_id: str):
@@ -397,7 +402,8 @@ def obtener_contrato_detalle(request, lote_id: str):
         "pie_inicial": float(contrato.pie_inicial),
         "total_cuotas": contrato.total_cuotas,
         "monto_cuota": monto_cuota,
-        "cuotas_pagadas": cuotas_pagadas
+        "cuotas_pagadas": cuotas_pagadas,
+        "tipo_pago": contrato.tipo_pago or ("contado" if contrato.total_cuotas <= 1 and cuotas_pagadas == contrato.total_cuotas else "credito")
     }
 
 
