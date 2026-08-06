@@ -41,4 +41,5 @@ class NotificationsSummaryOut(Schema):
     total_count: int
     pending_users_count: int
     due_today_count: int
+    overdue_count: int = 0
     items: List[NotificationItemSchema]

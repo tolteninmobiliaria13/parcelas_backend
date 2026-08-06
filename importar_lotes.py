@@ -73,7 +73,6 @@ for line in lines:
         numero_lote=lote_num,
         defaults={
             'subdivision': 'primera',
-            'superficie_m2': None,
             'precio_base': precio_base,
             'estado': estado
         }

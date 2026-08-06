@@ -65,7 +65,6 @@ def listar_parcelas(request, page: int = 1, limit: int = 20):
         resultado.append({
             "id": p.numero_lote,
             "owner": owner,
-            "surface": float(p.superficie_m2) if p.superficie_m2 else 0.0,
             "escritura": p.numero_rol or "",
             "precioVenta": float(p.precio_base),
             "abono": float(abono),
@@ -131,14 +130,12 @@ def crear_parcela(request, payload: ParcelaInSchema):
         numero_lote=payload.numero_lote,
         numero_rol=payload.numero_rol,
         subdivision=payload.subdivision,
-        superficie_m2=payload.superficie_m2,
         precio_base=payload.precio_base,
         estado=payload.estado or 'disponible'
     )
     return 201, {
         "id": parcela.numero_lote,
         "owner": "Sin Asignar",
-        "surface": float(parcela.superficie_m2) if parcela.superficie_m2 else 0.0,
         "escritura": parcela.numero_rol or "",
         "precioVenta": float(parcela.precio_base),
         "abono": 0.0,
@@ -193,7 +190,6 @@ def asignar_propietario(request, lote_id: str, payload: AsignarPropietarioInSche
         cliente=cliente,
         parcela=parcela,
         fecha_pago=payload.fecha_pago,
-        fecha_firma=payload.fecha_firma or payload.fecha_pago,
         pie_inicial=payload.pie_inicial,
         total_cuotas=payload.total_cuotas,
         tipo_pago=tipo_pago_val,
@@ -221,7 +217,6 @@ def asignar_propietario(request, lote_id: str, payload: AsignarPropietarioInSche
     return 200, {
         "id": parcela.numero_lote,
         "owner": cliente.nombre_completo,
-        "surface": float(parcela.superficie_m2) if parcela.superficie_m2 else 0.0,
         "escritura": parcela.numero_rol or "",
         "precioVenta": float(parcela.precio_base),
         "abono": abono_total,
@@ -240,8 +235,6 @@ def editar_parcela(request, lote_id: str, payload: ParcelaInSchema):
     if payload.numero_rol is not None:
         parcela.numero_rol = payload.numero_rol
     parcela.subdivision = payload.subdivision
-    if payload.superficie_m2 is not None:
-        parcela.superficie_m2 = payload.superficie_m2
     parcela.precio_base = payload.precio_base
     if payload.estado is not None:
         parcela.estado = payload.estado
@@ -263,7 +256,6 @@ def editar_parcela(request, lote_id: str, payload: ParcelaInSchema):
     return 200, {
         "id": parcela.numero_lote,
         "owner": owner_name,
-        "surface": float(parcela.superficie_m2) if parcela.superficie_m2 else 0.0,
         "escritura": parcela.numero_rol or "",
         "precioVenta": float(parcela.precio_base),
         "abono": abono,
@@ -297,13 +289,13 @@ def editar_cliente_api(request, cliente_id: str, payload: ClienteInSchema):
 def eliminar_cliente_api(request, cliente_id: str):
     from django.shortcuts import get_object_or_404
     from ninja.errors import HttpError
-    from django.db.models.deletion import ProtectedError
+    from django.db.models.deletion import ProtectedError, RestrictedError
     
     cliente = get_object_or_404(Cliente, id=cliente_id)
     try:
         cliente.delete()
-    except ProtectedError:
-        raise HttpError(400, "No se puede eliminar un cliente que tiene contratos activos asociados.")
+    except (ProtectedError, RestrictedError):
+        raise HttpError(400, "No se puede eliminar un cliente que tiene contratos asociados.")
     return {"success": True}
 
 @router.put("/{lote_id}/contrato", response={200: ParcelaCompletaSchema})
@@ -330,7 +322,6 @@ def editar_contrato(request, lote_id: str, payload: AsignarPropietarioInSchema):
             
     tipo_pago_val = payload.tipo_pago if payload.tipo_pago in ['contado', 'credito'] else ('contado' if payload.total_cuotas <= 1 else 'credito')
     contrato.fecha_pago = payload.fecha_pago
-    contrato.fecha_firma = payload.fecha_firma or payload.fecha_pago
     contrato.pie_inicial = payload.pie_inicial
     contrato.total_cuotas = payload.total_cuotas
     contrato.tipo_pago = tipo_pago_val
@@ -358,7 +349,6 @@ def editar_contrato(request, lote_id: str, payload: AsignarPropietarioInSchema):
     return 200, {
         "id": parcela.numero_lote,
         "owner": contrato.cliente.nombre_completo,
-        "surface": float(parcela.superficie_m2) if parcela.superficie_m2 else 0.0,
         "escritura": parcela.numero_rol or "",
         "precioVenta": float(parcela.precio_base),
         "abono": abono_total,
@@ -372,7 +362,6 @@ class ContratoDetalleSchema(Schema):
     cliente_id: str
     cliente_nombre: str
     fecha_pago: date
-    fecha_firma: Optional[date] = None
     pie_inicial: float
     total_cuotas: int
     monto_cuota: float
@@ -398,7 +387,6 @@ def obtener_contrato_detalle(request, lote_id: str):
         "cliente_id": str(contrato.cliente.id),
         "cliente_nombre": contrato.cliente.nombre_completo,
         "fecha_pago": contrato.fecha_pago,
-        "fecha_firma": contrato.fecha_firma or contrato.fecha_pago,
         "pie_inicial": float(contrato.pie_inicial),
         "total_cuotas": contrato.total_cuotas,
         "monto_cuota": monto_cuota,
