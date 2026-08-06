@@ -38,11 +38,10 @@ class Parcela(models.Model):
     ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     numero_lote = models.CharField(max_length=50)
-    # numero_rol y superficie_m2 ahora permiten nulos
+    # numero_rol permite nulos
     numero_rol = models.CharField(max_length=50, null=True, blank=True)
     subdivision = models.CharField(max_length=100)
     subdivision_ref = models.ForeignKey(Subdivision, on_delete=models.SET_NULL, null=True, blank=True)
-    superficie_m2 = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     precio_base = models.DecimalField(max_digits=12, decimal_places=2)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='disponible')
     en_papelera = models.BooleanField(default=False)
@@ -68,7 +67,6 @@ class Contrato(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.RESTRICT)
     parcela = models.ForeignKey(Parcela, on_delete=models.RESTRICT)
     fecha_pago = models.DateField()
-    fecha_firma = models.DateField(null=True, blank=True)
     pie_inicial = models.DecimalField(max_digits=12, decimal_places=2)
     total_cuotas = models.IntegerField()
     tipo_pago = models.CharField(max_length=20, choices=TIPO_PAGO_CHOICES, default='credito')

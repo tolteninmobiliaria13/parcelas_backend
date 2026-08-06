@@ -123,30 +123,45 @@ def get_notifications(request):
 
     # 2. Cuotas que vencen hoy o están vencidas y no pagadas
     today = date.today()
-    cuotas_vencidas = list(
+    cuotas_vencidas_o_hoy = list(
         Pago.objects.select_related('contrato__cliente', 'contrato__parcela')
         .filter(fecha_vencimiento__lte=today)
         .exclude(estado='pagado')
-        .order_by('fecha_vencimiento')[:15]
+        .order_by('fecha_vencimiento')[:20]
     )
     
-    due_items = [
-        NotificationItemSchema(
-            id=str(p.id),
-            tipo="cuota_vencimiento",
-            titulo=f"Cuota #{p.numero_cuota} {'vence hoy' if p.fecha_vencimiento == today else 'vencida'}",
-            descripcion=f"Lote {p.contrato.parcela.numero_lote} ({p.contrato.cliente.nombre_completo}) - ${int(p.monto_cobrar):,}",
-            fecha=p.fecha_vencimiento.strftime("%Y-%m-%d"),
-            link="/vencimientos"
+    due_items = []
+    due_today_count = 0
+    overdue_count = 0
+
+    for p in cuotas_vencidas_o_hoy:
+        is_today = p.fecha_vencimiento == today
+        if is_today:
+            due_today_count += 1
+            tipo_notif = "cuota_hoy"
+            titulo_notif = f"Cuota #{p.numero_cuota} vence hoy"
+        else:
+            overdue_count += 1
+            tipo_notif = "cuota_vencida"
+            titulo_notif = f"Cuota #{p.numero_cuota} vencida"
+
+        due_items.append(
+            NotificationItemSchema(
+                id=str(p.id),
+                tipo=tipo_notif,
+                titulo=titulo_notif,
+                descripcion=f"Lote {p.contrato.parcela.numero_lote} ({p.contrato.cliente.nombre_completo}) - ${int(p.monto_cobrar):,}",
+                fecha=p.fecha_vencimiento.strftime("%d/%m/%Y"),
+                link="/vencimientos"
+            )
         )
-        for p in cuotas_vencidas
-    ]
 
     all_items = pending_items + due_items
     return NotificationsSummaryOut(
         total_count=len(all_items),
         pending_users_count=len(pending_items),
-        due_today_count=len(due_items),
+        due_today_count=due_today_count,
+        overdue_count=overdue_count,
         items=all_items
     )
 

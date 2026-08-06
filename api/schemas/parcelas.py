@@ -8,7 +8,6 @@ class AsignarPropietarioInSchema(Schema):
     cliente_email: Optional[str] = None
     cliente_telefono: Optional[str] = None
     fecha_pago: date
-    fecha_firma: Optional[date] = None
     pie_inicial: float
     total_cuotas: int
     monto_cuota: float
@@ -19,14 +18,12 @@ class ParcelaInSchema(Schema):
     numero_lote: str
     numero_rol: Optional[str] = None
     subdivision: str
-    superficie_m2: Optional[float] = None
     precio_base: float
     estado: Optional[str] = 'disponible'
 
 class ParcelaCompletaSchema(Schema):
     id: str
     owner: str
-    surface: float
     escritura: str
     precioVenta: float
     abono: float
