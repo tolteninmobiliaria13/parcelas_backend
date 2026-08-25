@@ -14,6 +14,20 @@ class AsignarPropietarioInSchema(Schema):
     cuotas_pagadas: Optional[int] = 0
     tipo_pago: Optional[str] = 'credito'
 
+class CambiarPropietarioInSchema(Schema):
+    cliente_id: Optional[str] = None
+    cliente_nombre: Optional[str] = None
+    cliente_email: Optional[str] = None
+    cliente_telefono: Optional[str] = None
+
+class EditarContratoInSchema(Schema):
+    fecha_pago: date
+    pie_inicial: float
+    total_cuotas: int
+    monto_cuota: float
+    cuotas_pagadas: Optional[int] = 0
+    tipo_pago: Optional[str] = 'credito'
+
 class ParcelaInSchema(Schema):
     numero_lote: str
     numero_rol: Optional[str] = None
