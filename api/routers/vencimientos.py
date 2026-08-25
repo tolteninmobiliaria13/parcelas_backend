@@ -4,6 +4,7 @@ from datetime import date
 from django.http import HttpResponse
 from django.template import Template, Context
 from pathlib import Path
+from django.db.models import Q
 from ..models import Contrato, Pago
 from ..schemas.vencimientos import LotPaymentMatrixSchema, MonthlyPaymentSchema
 
@@ -193,7 +194,7 @@ def format_clp(amount):
     return f"$ {formatted}"
 
 
-def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_year: Optional[int] = None):
+def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_year: Optional[int] = None, tipo_pago: Optional[str] = None):
     from collections import defaultdict
     today = date.today()
     month = target_month if (target_month is not None and 1 <= target_month <= 12) else today.month
@@ -202,7 +203,13 @@ def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_
     mes_str = SPANISH_MONTHS.get(month, 'Enero')
     periodo_str = f"{mes_str} {year}"
     
-    contratos = Contrato.objects.filter(estado='activo', parcela__en_papelera=False).select_related('cliente', 'parcela').all()
+    query = Q(estado='activo', parcela__en_papelera=False)
+    if tipo_pago == 'credito':
+        query &= (Q(tipo_pago='credito') | Q(total_cuotas__gt=1)) & ~Q(tipo_pago='contado')
+    elif tipo_pago == 'contado':
+        query &= (Q(tipo_pago='contado') | Q(total_cuotas=1))
+
+    contratos = Contrato.objects.filter(query).select_related('cliente', 'parcela').all()
     
     # Fetch all payments as dicts to avoid instantiating thousands of Django models (10x faster)
     pagos_all = Pago.objects.values(
@@ -433,8 +440,8 @@ def obtener_datos_reporte_mes_actual(target_month: Optional[int] = None, target_
 
 
 @router.get("/reporte-data")
-def obtener_reporte_data(request, month: Optional[int] = None, year: Optional[int] = None):
-    return obtener_datos_reporte_mes_actual(target_month=month, target_year=year)
+def obtener_reporte_data(request, month: Optional[int] = None, year: Optional[int] = None, tipo_pago: Optional[str] = None):
+    return obtener_datos_reporte_mes_actual(target_month=month, target_year=year, tipo_pago=tipo_pago)
 
 
 @router.get("/reporte")
