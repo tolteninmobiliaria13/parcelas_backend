@@ -112,6 +112,10 @@ def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
         next_due_date = c.proximo_vencimiento.strftime("%d/%m/%Y") if c.proximo_vencimiento else None
         last_payment_date = c.ultimo_pago.strftime("%d/%m/%Y") if c.ultimo_pago else None
 
+        overdue_cnt = getattr(c, 'overdue_cnt', 0)
+        overdue_bal = float(getattr(c, 'overdue_bal', 0) or 0.0)
+        status = "overdue" if overdue_cnt > 0 else (c.estado_calculado if c.estado_calculado != "overdue" else "current")
+
         resultado.append({
             "id": str(c.id),
             "lot": c.parcela.numero_lote,
@@ -122,9 +126,9 @@ def listar_dashboard_lots(request, page: int = 1, limit: int = 20):
             "installmentCount": c.total_cuotas,
             "installmentValue": float(c.installment_value),
             "nextDueDate": next_due_date,
-            "status": c.estado_calculado,
-            "overdueCount": getattr(c, 'overdue_cnt', 0),
-            "overdueBalance": float(getattr(c, 'overdue_bal', 0) or 0.0),
+            "status": status,
+            "overdueCount": overdue_cnt,
+            "overdueBalance": overdue_bal,
             "lastPaymentDate": last_payment_date,
             "paymentMethod": "Transferencia"
         })
