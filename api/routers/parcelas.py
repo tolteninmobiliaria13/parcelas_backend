@@ -2,7 +2,7 @@ from ninja import Router, Schema
 from typing import List, Optional
 from django.db.models import Sum
 from ..models import Parcela, Contrato, Cliente, Pago
-from ..schemas.parcelas import ParcelaCompletaSchema, ParcelaInSchema, AsignarPropietarioInSchema, PaginatedParcelaSchema
+from ..schemas.parcelas import ParcelaCompletaSchema, ParcelaInSchema, AsignarPropietarioInSchema, PaginatedParcelaSchema, CambiarPropietarioInSchema, EditarContratoInSchema
 from ..schemas.clientes import ClienteSchema, ClienteInSchema
 
 router = Router()
@@ -298,6 +298,48 @@ def eliminar_cliente_api(request, cliente_id: str):
         raise HttpError(400, "No se puede eliminar un cliente que tiene contratos asociados.")
     return {"success": True}
 
+@router.put("/{lote_id}/propietario", response={200: ParcelaCompletaSchema})
+def cambiar_propietario(request, lote_id: str, payload: CambiarPropietarioInSchema):
+    from django.shortcuts import get_object_or_404
+    from ninja.errors import HttpError
+
+    parcela = get_object_or_404(Parcela, numero_lote=lote_id)
+    contrato = parcela.contrato_set.filter(estado='activo').first()
+    if not contrato:
+        raise HttpError(404, "No existe un contrato activo para esta parcela.")
+
+    if payload.cliente_id:
+        cliente = get_object_or_404(Cliente, id=payload.cliente_id)
+        contrato.cliente = cliente
+    else:
+        if not payload.cliente_nombre:
+            raise HttpError(400, "El nombre del cliente es obligatorio.")
+        cliente = Cliente.objects.create(
+            nombre_completo=payload.cliente_nombre,
+            email=payload.cliente_email,
+            telefono=payload.cliente_telefono
+        )
+        contrato.cliente = cliente
+
+    contrato.save()
+
+    pagos = contrato.pagos.all()
+    abono = float(contrato.pie_inicial) + float(sum(p.monto_cobrar for p in pagos if p.estado == 'pagado'))
+    saldo = float(sum(p.monto_cobrar for p in pagos if p.estado != 'pagado'))
+    status = "overdue" if any(p.estado == 'vencido' for p in pagos) else "current"
+
+    return 200, {
+        "id": parcela.numero_lote,
+        "owner": contrato.cliente.nombre_completo,
+        "escritura": parcela.numero_rol or "",
+        "precioVenta": float(parcela.precio_base),
+        "abono": abono,
+        "saldo": saldo,
+        "status": status,
+        "subdivision": parcela.subdivision,
+        "estado": parcela.estado
+    }
+
 @router.put("/{lote_id}/contrato", response={200: ParcelaCompletaSchema})
 def editar_contrato(request, lote_id: str, payload: AsignarPropietarioInSchema):
     from django.shortcuts import get_object_or_404
@@ -382,11 +424,12 @@ def obtener_contrato_detalle(request, lote_id: str):
     primer_pago = pagos.first()
     monto_cuota = float(primer_pago.monto_cobrar) if primer_pago else 0.0
     cuotas_pagadas = pagos.filter(estado='pagado').count()
+    fecha_pago_val = primer_pago.fecha_vencimiento if primer_pago else contrato.fecha_pago
     
     return 200, {
         "cliente_id": str(contrato.cliente.id),
         "cliente_nombre": contrato.cliente.nombre_completo,
-        "fecha_pago": contrato.fecha_pago,
+        "fecha_pago": fecha_pago_val,
         "pie_inicial": float(contrato.pie_inicial),
         "total_cuotas": contrato.total_cuotas,
         "monto_cuota": monto_cuota,

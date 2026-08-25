@@ -155,9 +155,10 @@ def recalcular_contrato(contrato_id):
     # Último pago
     ultimo = pagos.filter(estado='pagado').aggregate(m=Max('fecha_pago_real'))['m']
     
-    # Monto de primera cuota para "installment_value"
+    # Monto y fecha de primera cuota
     primera_cuota = pagos.order_by('numero_cuota').first()
     inst_val = primera_cuota.monto_cobrar if primera_cuota else 0
+    fecha_pago_base = primera_cuota.fecha_vencimiento if primera_cuota else contrato.fecha_pago
 
     # Determinar estado
     today = date.today()
@@ -173,6 +174,7 @@ def recalcular_contrato(contrato_id):
         estado_calc = 'current' if contrato.estado == 'activo' else 'inactive'
 
     Contrato.objects.filter(id=contrato_id).update(
+        fecha_pago=fecha_pago_base,
         saldo_pendiente=saldo,
         proximo_vencimiento=proximo,
         ultimo_pago=ultimo,
