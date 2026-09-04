@@ -45,6 +45,9 @@ class ParcelaCompletaSchema(Schema):
     status: str
     subdivision: str
     estado: str
+    total_cuotas: Optional[int] = 0
+    cuotas_pagadas: Optional[int] = 0
+    tipo_pago: Optional[str] = 'credito'
 
 class PaginatedParcelaSchema(Schema):
     items: list[ParcelaCompletaSchema]

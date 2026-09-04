@@ -1,6 +1,6 @@
 from ninja import Router, Schema
 from typing import List, Optional
-from django.db.models import Sum
+from django.db.models import Sum, Count
 from ..models import Parcela, Contrato, Cliente, Pago
 from ..schemas.parcelas import ParcelaCompletaSchema, ParcelaInSchema, AsignarPropietarioInSchema, PaginatedParcelaSchema, CambiarPropietarioInSchema, EditarContratoInSchema
 from ..schemas.clientes import ClienteSchema, ClienteInSchema
@@ -45,6 +45,9 @@ def listar_parcelas(request, page: int = 1, limit: int = 20):
     parcelas = todos_lotes[offset:offset+limit]
     contratos = list(Contrato.objects.filter(estado='activo').select_related('cliente'))
     contratos_map = {c.parcela_id: c for c in contratos}
+    
+    pagos_pagados = Pago.objects.filter(contrato__in=contratos, estado='pagado').values('contrato_id').annotate(c=Count('id'))
+    pagos_pagados_map = {p['contrato_id']: p['c'] for p in pagos_pagados}
 
     resultado = []
     for p in parcelas:
@@ -52,15 +55,20 @@ def listar_parcelas(request, page: int = 1, limit: int = 20):
         if contrato:
             owner = contrato.cliente.nombre_completo
             total_cuotas_esperado = contrato.total_cuotas * contrato.installment_value
-            pagos_realizados = float(total_cuotas_esperado) - float(contrato.saldo_pendiente)
-            abono = float(contrato.pie_inicial) + pagos_realizados
             saldo = float(contrato.saldo_pendiente)
+            abono = float(contrato.pie_inicial)
             status = contrato.estado_calculado
+            total_cuotas = contrato.total_cuotas
+            cuotas_pagadas = pagos_pagados_map.get(contrato.id, 0)
+            tipo_pago = contrato.tipo_pago or ("contado" if total_cuotas <= 1 else "credito")
         else:
             owner = "Sin Asignar"
             abono = 0.0
             saldo = 0.0
             status = "inactive"
+            total_cuotas = 0
+            cuotas_pagadas = 0
+            tipo_pago = "credito"
 
         resultado.append({
             "id": p.numero_lote,
@@ -71,7 +79,10 @@ def listar_parcelas(request, page: int = 1, limit: int = 20):
             "saldo": float(saldo),
             "status": status,
             "subdivision": p.subdivision,
-            "estado": p.estado
+            "estado": p.estado,
+            "total_cuotas": total_cuotas,
+            "cuotas_pagadas": cuotas_pagadas,
+            "tipo_pago": tipo_pago
         })
     return {
         "items": resultado,

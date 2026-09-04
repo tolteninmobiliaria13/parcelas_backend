@@ -28,34 +28,30 @@ def obtener_dashboard_stats(request):
     )
     total_pagado_mes = paid_this_month.aggregate(total=Sum('monto_cobrar'))['total'] or 0.0
 
-    # lotes_con_deuda: cantidad de parcelas con pagos vencidos (estado 'vencido' o 'pendiente' ya vencido)
-    from django.db.models import Q
-    lotes_con_deuda = (
-        Contrato.objects.filter(
-            parcela__en_papelera=False
-        ).filter(
-            Q(pagos__estado='vencido') |
-            Q(pagos__estado='pendiente', pagos__fecha_vencimiento__lt=today)
-        )
-        .values('parcela')
-        .distinct()
-        .count()
-    )
-
-    # proximos_vencimientos: cantidad de cuotas pendientes que vencen en el mes actual y no están vencidas
-    proximos_vencimientos = Pago.objects.filter(
+    # pagos_atrasados: cuotas de meses anteriores pagadas en el mes actual
+    primer_dia_mes = today.replace(day=1)
+    pagos_atrasados_q = Pago.objects.filter(
         contrato__parcela__en_papelera=False,
-        estado='pendiente', 
-        fecha_vencimiento__year=today.year, 
-        fecha_vencimiento__month=today.month,
-        fecha_vencimiento__gte=today
-    ).count()
+        estado='pagado',
+        fecha_pago_real__year=today.year,
+        fecha_pago_real__month=today.month,
+        fecha_vencimiento__lt=primer_dia_mes
+    )
+    pagos_atrasados = pagos_atrasados_q.aggregate(total=Sum('monto_cobrar'))['total'] or 0.0
+
+    # total_recaudado: sumatoria de todos los pagos recibidos este mes
+    total_recaudado = Pago.objects.filter(
+        contrato__parcela__en_papelera=False,
+        estado='pagado',
+        fecha_pago_real__year=today.year,
+        fecha_pago_real__month=today.month
+    ).aggregate(total=Sum('monto_cobrar'))['total'] or 0.0
 
     return {
         "total_por_pagar": float(total_por_pagar),
         "total_pagado_mes": float(total_pagado_mes),
-        "lotes_con_deuda": lotes_con_deuda,
-        "proximos_vencimientos": proximos_vencimientos
+        "pagos_atrasados": float(pagos_atrasados),
+        "total_recaudado": float(total_recaudado)
     }
 
 def clave_orden_lote_contrato(c: Contrato):
