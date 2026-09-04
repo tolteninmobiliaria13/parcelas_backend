@@ -4,8 +4,8 @@ from typing import Optional
 class DashboardStatsSchema(Schema):
     total_por_pagar: float
     total_pagado_mes: float
-    lotes_con_deuda: int
-    proximos_vencimientos: int
+    pagos_atrasados: float
+    total_recaudado: float
 
 class LotSchema(Schema):
     id: str
