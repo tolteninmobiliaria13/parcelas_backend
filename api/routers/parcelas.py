@@ -296,16 +296,6 @@ def crear_cliente_api(request, payload: ClienteInSchema):
     )
     return 201, cliente
 
-@router.put("/clientes/{cliente_id}", response={200: ClienteSchema})
-def editar_cliente_api(request, cliente_id: str, payload: ClienteInSchema):
-    from django.shortcuts import get_object_or_404
-    cliente = get_object_or_404(Cliente, id=cliente_id)
-    cliente.nombre_completo = payload.nombre_completo
-    cliente.email = payload.email
-    cliente.telefono = payload.telefono
-    cliente.save()
-    return 200, cliente
-
 @router.get("/clientes/papelera", response=List[ClientePapeleraSchema])
 def listar_clientes_papelera(request):
     clientes_papelera = list(Cliente.objects.filter(en_papelera=True).order_by('-fecha_eliminacion'))
@@ -320,6 +310,16 @@ def listar_clientes_papelera(request):
             "fecha_eliminacion": fecha_elim_str
         })
     return resultado
+
+@router.put("/clientes/{cliente_id}", response={200: ClienteSchema})
+def editar_cliente_api(request, cliente_id: str, payload: ClienteInSchema):
+    from django.shortcuts import get_object_or_404
+    cliente = get_object_or_404(Cliente, id=cliente_id)
+    cliente.nombre_completo = payload.nombre_completo
+    cliente.email = payload.email
+    cliente.telefono = payload.telefono
+    cliente.save()
+    return 200, cliente
 
 @router.delete("/clientes/{cliente_id}", response=MessageResponseSchema)
 def mover_cliente_a_papelera(request, cliente_id: str):
