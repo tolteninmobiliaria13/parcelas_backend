@@ -252,6 +252,8 @@ def editar_parcela(request, lote_id: str, payload: ParcelaInSchema):
     from django.shortcuts import get_object_or_404
     parcela = get_object_or_404(Parcela, numero_lote=lote_id)
     
+    precio_antiguo = float(parcela.precio_base)
+    
     parcela.numero_lote = payload.numero_lote
     if payload.numero_rol is not None:
         parcela.numero_rol = payload.numero_rol
@@ -268,6 +270,24 @@ def editar_parcela(request, lote_id: str, payload: ParcelaInSchema):
     saldo = 0.0
     status = "inactive"
     if contrato:
+        nuevo_precio = float(payload.precio_base)
+        if precio_antiguo != nuevo_precio:
+            pagos = contrato.pagos.all()
+            pagos_pendientes = [p for p in pagos if p.estado != 'pagado']
+            
+            if pagos_pendientes:
+                total_pagado = sum(float(p.monto_cobrar) for p in pagos if p.estado == 'pagado')
+                saldo_restante = nuevo_precio - float(contrato.pie_inicial) - total_pagado
+                nuevo_monto_cuota = saldo_restante / len(pagos_pendientes)
+                
+                from decimal import Decimal
+                for p in pagos_pendientes:
+                    p.monto_cobrar = Decimal(str(nuevo_monto_cuota))
+                    p.save()
+                    
+                from ..models import recalcular_contrato
+                recalcular_contrato(contrato.id)
+
         owner_name = contrato.cliente.nombre_completo
         pagos = contrato.pagos.all()
         abono = float(contrato.pie_inicial) + float(sum(p.monto_cobrar for p in pagos if p.estado == 'pagado'))
