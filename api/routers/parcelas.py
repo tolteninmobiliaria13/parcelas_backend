@@ -176,66 +176,76 @@ def listar_todos_clientes(request):
 def asignar_propietario(request, lote_id: str, payload: AsignarPropietarioInSchema):
     from django.shortcuts import get_object_or_404
     from ninja.errors import HttpError
+    from django.db import transaction
+    from ..models import recalcular_contrato
     
-    parcela = get_object_or_404(Parcela, numero_lote=lote_id)
-    
-    if payload.cliente_id:
-        cliente = get_object_or_404(Cliente, id=payload.cliente_id)
-    else:
-        if not payload.cliente_nombre:
-            raise HttpError(400, "El nombre del cliente es obligatorio para registrar un nuevo dueño.")
-        cliente = Cliente.objects.create(
-            nombre_completo=payload.cliente_nombre,
-            email=payload.cliente_email,
-            telefono=payload.cliente_telefono
-        )
+    with transaction.atomic():
+        parcela = get_object_or_404(Parcela, numero_lote=lote_id)
         
-    parcela.estado = 'vendida'
-    parcela.save()
-    
-    # Desactivar cualquier contrato activo previo para esta parcela
-    Contrato.objects.filter(parcela=parcela, estado='activo').update(estado='finalizado')
+        if payload.cliente_id:
+            cliente = get_object_or_404(Cliente, id=payload.cliente_id)
+        else:
+            if not payload.cliente_nombre:
+                raise HttpError(400, "El nombre del cliente es obligatorio para registrar un nuevo dueño.")
+            cliente = Cliente.objects.create(
+                nombre_completo=payload.cliente_nombre,
+                email=payload.cliente_email,
+                telefono=payload.cliente_telefono
+            )
+            
+        parcela.estado = 'vendida'
+        parcela.save()
+        
+        # Desactivar cualquier contrato activo previo para esta parcela
+        Contrato.objects.filter(parcela=parcela, estado='activo').update(estado='finalizado')
 
-    tipo_pago_val = payload.tipo_pago if payload.tipo_pago in ['contado', 'credito'] else ('contado' if payload.total_cuotas <= 1 else 'credito')
-    contrato = Contrato.objects.create(
-        cliente=cliente,
-        parcela=parcela,
-        fecha_pago=payload.fecha_pago,
-        pie_inicial=payload.pie_inicial,
-        total_cuotas=payload.total_cuotas,
-        tipo_pago=tipo_pago_val,
-        estado='activo'
-    )
-    
-    cuotas_pagadas = payload.cuotas_pagadas or 0
-    for i in range(1, payload.total_cuotas + 1):
-        fecha_vencimiento = sumar_meses(payload.fecha_pago, i - 1)
-        pago_estado = 'pagado' if i <= cuotas_pagadas else 'pendiente'
-        fecha_pago_real = fecha_vencimiento if i <= cuotas_pagadas else None
-        
-        Pago.objects.create(
-            contrato=contrato,
-            numero_cuota=i,
-            monto_cobrar=payload.monto_cuota,
-            fecha_vencimiento=fecha_vencimiento,
-            fecha_pago_real=fecha_pago_real,
-            estado=pago_estado
+        tipo_pago_val = payload.tipo_pago if payload.tipo_pago in ['contado', 'credito'] else ('contado' if payload.total_cuotas <= 1 else 'credito')
+        contrato = Contrato.objects.create(
+            cliente=cliente,
+            parcela=parcela,
+            fecha_pago=payload.fecha_pago,
+            pie_inicial=payload.pie_inicial,
+            total_cuotas=payload.total_cuotas,
+            tipo_pago=tipo_pago_val,
+            estado='activo'
         )
         
-    abono_total = float(payload.pie_inicial) + (cuotas_pagadas * float(payload.monto_cuota))
-    saldo_total = (payload.total_cuotas - cuotas_pagadas) * float(payload.monto_cuota)
+        cuotas_pagadas = payload.cuotas_pagadas or 0
+        pagos_a_crear = []
+        for i in range(1, payload.total_cuotas + 1):
+            fecha_vencimiento = sumar_meses(payload.fecha_pago, i - 1)
+            pago_estado = 'pagado' if i <= cuotas_pagadas else 'pendiente'
+            fecha_pago_real = fecha_vencimiento if i <= cuotas_pagadas else None
+            
+            pagos_a_crear.append(Pago(
+                contrato=contrato,
+                numero_cuota=i,
+                monto_cobrar=payload.monto_cuota,
+                fecha_vencimiento=fecha_vencimiento,
+                fecha_pago_real=fecha_pago_real,
+                estado=pago_estado
+            ))
+            
+        if pagos_a_crear:
+            Pago.objects.bulk_create(pagos_a_crear)
         
-    return 200, {
-        "id": parcela.numero_lote,
-        "owner": cliente.nombre_completo,
-        "escritura": parcela.numero_rol or "",
-        "precioVenta": float(parcela.precio_base),
-        "abono": abono_total,
-        "saldo": saldo_total,
-        "status": "current",
-        "subdivision": parcela.subdivision,
-        "estado": parcela.estado
-    }
+        # Recalcular contrato una sola vez para actualizar campos cacheados
+        recalcular_contrato(contrato.id)
+            
+        abono_total = float(payload.pie_inicial) + (cuotas_pagadas * float(payload.monto_cuota))
+        saldo_total = (payload.total_cuotas - cuotas_pagadas) * float(payload.monto_cuota)
+            
+        return 200, {
+            "id": parcela.numero_lote,
+            "owner": cliente.nombre_completo,
+            "escritura": parcela.numero_rol or "",
+            "precioVenta": float(parcela.precio_base),
+            "abono": abono_total,
+            "saldo": saldo_total,
+            "status": "current",
+            "subdivision": parcela.subdivision,
+            "estado": parcela.estado
+        }
 
 @router.put("/{lote_id}", response={200: ParcelaCompletaSchema})
 def editar_parcela(request, lote_id: str, payload: ParcelaInSchema):
@@ -355,61 +365,70 @@ def cambiar_propietario(request, lote_id: str, payload: CambiarPropietarioInSche
 def editar_contrato(request, lote_id: str, payload: AsignarPropietarioInSchema):
     from django.shortcuts import get_object_or_404
     from ninja.errors import HttpError
+    from django.db import transaction
+    from ..models import recalcular_contrato
     
-    parcela = get_object_or_404(Parcela, numero_lote=lote_id)
-    contrato = parcela.contrato_set.filter(estado='activo').first()
-    if not contrato:
-        raise HttpError(404, "No existe un contrato activo para esta parcela.")
-        
-    if payload.cliente_id:
-        cliente = get_object_or_404(Cliente, id=payload.cliente_id)
-        contrato.cliente = cliente
-    else:
-        if payload.cliente_nombre:
-            cliente = Cliente.objects.create(
-                nombre_completo=payload.cliente_nombre,
-                email=payload.cliente_email,
-                telefono=payload.cliente_telefono
-            )
-            contrato.cliente = cliente
+    with transaction.atomic():
+        parcela = get_object_or_404(Parcela, numero_lote=lote_id)
+        contrato = parcela.contrato_set.filter(estado='activo').first()
+        if not contrato:
+            raise HttpError(404, "No existe un contrato activo para esta parcela.")
             
-    tipo_pago_val = payload.tipo_pago if payload.tipo_pago in ['contado', 'credito'] else ('contado' if payload.total_cuotas <= 1 else 'credito')
-    contrato.fecha_pago = payload.fecha_pago
-    contrato.pie_inicial = payload.pie_inicial
-    contrato.total_cuotas = payload.total_cuotas
-    contrato.tipo_pago = tipo_pago_val
-    contrato.save()
-    
-    contrato.pagos.all().delete()
-    cuotas_pagadas = payload.cuotas_pagadas or 0
-    for i in range(1, payload.total_cuotas + 1):
-        fecha_vencimiento = sumar_meses(payload.fecha_pago, i - 1)
-        pago_estado = 'pagado' if i <= cuotas_pagadas else 'pendiente'
-        fecha_pago_real = fecha_vencimiento if i <= cuotas_pagadas else None
+        if payload.cliente_id:
+            cliente = get_object_or_404(Cliente, id=payload.cliente_id)
+            contrato.cliente = cliente
+        else:
+            if payload.cliente_nombre:
+                cliente = Cliente.objects.create(
+                    nombre_completo=payload.cliente_nombre,
+                    email=payload.cliente_email,
+                    telefono=payload.cliente_telefono
+                )
+                contrato.cliente = cliente
+                
+        tipo_pago_val = payload.tipo_pago if payload.tipo_pago in ['contado', 'credito'] else ('contado' if payload.total_cuotas <= 1 else 'credito')
+        contrato.fecha_pago = payload.fecha_pago
+        contrato.pie_inicial = payload.pie_inicial
+        contrato.total_cuotas = payload.total_cuotas
+        contrato.tipo_pago = tipo_pago_val
+        contrato.save()
         
-        Pago.objects.create(
-            contrato=contrato,
-            numero_cuota=i,
-            monto_cobrar=payload.monto_cuota,
-            fecha_vencimiento=fecha_vencimiento,
-            fecha_pago_real=fecha_pago_real,
-            estado=pago_estado
-        )
+        contrato.pagos.all().delete()
+        cuotas_pagadas = payload.cuotas_pagadas or 0
+        pagos_a_crear = []
+        for i in range(1, payload.total_cuotas + 1):
+            fecha_vencimiento = sumar_meses(payload.fecha_pago, i - 1)
+            pago_estado = 'pagado' if i <= cuotas_pagadas else 'pendiente'
+            fecha_pago_real = fecha_vencimiento if i <= cuotas_pagadas else None
+            
+            pagos_a_crear.append(Pago(
+                contrato=contrato,
+                numero_cuota=i,
+                monto_cobrar=payload.monto_cuota,
+                fecha_vencimiento=fecha_vencimiento,
+                fecha_pago_real=fecha_pago_real,
+                estado=pago_estado
+            ))
+            
+        if pagos_a_crear:
+            Pago.objects.bulk_create(pagos_a_crear)
+            
+        recalcular_contrato(contrato.id)
+            
+        abono_total = float(payload.pie_inicial) + (cuotas_pagadas * float(payload.monto_cuota))
+        saldo_total = (payload.total_cuotas - cuotas_pagadas) * float(payload.monto_cuota)
         
-    abono_total = float(payload.pie_inicial) + (cuotas_pagadas * float(payload.monto_cuota))
-    saldo_total = (payload.total_cuotas - cuotas_pagadas) * float(payload.monto_cuota)
-    
-    return 200, {
-        "id": parcela.numero_lote,
-        "owner": contrato.cliente.nombre_completo,
-        "escritura": parcela.numero_rol or "",
-        "precioVenta": float(parcela.precio_base),
-        "abono": abono_total,
-        "saldo": saldo_total,
-        "status": "current",
-        "subdivision": parcela.subdivision,
-        "estado": parcela.estado
-    }
+        return 200, {
+            "id": parcela.numero_lote,
+            "owner": contrato.cliente.nombre_completo,
+            "escritura": parcela.numero_rol or "",
+            "precioVenta": float(parcela.precio_base),
+            "abono": abono_total,
+            "saldo": saldo_total,
+            "status": "current",
+            "subdivision": parcela.subdivision,
+            "estado": parcela.estado
+        }
 
 class ContratoDetalleSchema(Schema):
     cliente_id: str
