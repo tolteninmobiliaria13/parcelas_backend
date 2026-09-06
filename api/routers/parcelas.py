@@ -3,7 +3,7 @@ from typing import List, Optional
 from django.db.models import Sum, Count
 from ..models import Parcela, Contrato, Cliente, Pago
 from ..schemas.parcelas import ParcelaCompletaSchema, ParcelaInSchema, AsignarPropietarioInSchema, PaginatedParcelaSchema, CambiarPropietarioInSchema, EditarContratoInSchema
-from ..schemas.clientes import ClienteSchema, ClienteInSchema
+from ..schemas.clientes import ClienteSchema, ClienteInSchema, ClientePapeleraSchema
 
 router = Router()
 
@@ -170,7 +170,7 @@ def sumar_meses(fecha: date, meses: int) -> date:
 
 @router.get("/clientes", response=List[ClienteSchema])
 def listar_todos_clientes(request):
-    return Cliente.objects.all()
+    return Cliente.objects.filter(en_papelera=False)
 
 @router.post("/{lote_id}/asignar", response={200: ParcelaCompletaSchema})
 def asignar_propietario(request, lote_id: str, payload: AsignarPropietarioInSchema):
@@ -306,18 +306,66 @@ def editar_cliente_api(request, cliente_id: str, payload: ClienteInSchema):
     cliente.save()
     return 200, cliente
 
-@router.delete("/clientes/{cliente_id}")
-def eliminar_cliente_api(request, cliente_id: str):
+@router.get("/clientes/papelera", response=List[ClientePapeleraSchema])
+def listar_clientes_papelera(request):
+    clientes_papelera = list(Cliente.objects.filter(en_papelera=True).order_by('-fecha_eliminacion'))
+    resultado = []
+    for c in clientes_papelera:
+        fecha_elim_str = c.fecha_eliminacion.strftime("%d/%m/%Y %H:%M") if c.fecha_eliminacion else None
+        resultado.append({
+            "id": c.id,
+            "nombre_completo": c.nombre_completo,
+            "email": c.email,
+            "telefono": c.telefono,
+            "fecha_eliminacion": fecha_elim_str
+        })
+    return resultado
+
+@router.delete("/clientes/{cliente_id}", response=MessageResponseSchema)
+def mover_cliente_a_papelera(request, cliente_id: str):
     from django.shortcuts import get_object_or_404
-    from ninja.errors import HttpError
-    from django.db.models.deletion import ProtectedError, RestrictedError
-    
+    from django.utils import timezone
     cliente = get_object_or_404(Cliente, id=cliente_id)
-    try:
-        cliente.delete()
-    except (ProtectedError, RestrictedError):
-        raise HttpError(400, "No se puede eliminar un cliente que tiene contratos asociados.")
-    return {"success": True}
+    cliente.en_papelera = True
+    cliente.fecha_eliminacion = timezone.now()
+    cliente.save()
+    return {"success": True, "message": f"El cliente {cliente.nombre_completo} fue movido a la papelera."}
+
+@router.put("/clientes/{cliente_id}/restaurar", response=MessageResponseSchema)
+def restaurar_cliente_de_papelera(request, cliente_id: str):
+    from django.shortcuts import get_object_or_404
+    cliente = get_object_or_404(Cliente, id=cliente_id)
+    cliente.en_papelera = False
+    cliente.fecha_eliminacion = None
+    cliente.save()
+    return {"success": True, "message": f"El cliente {cliente.nombre_completo} ha sido restaurado."}
+
+@router.delete("/clientes/{cliente_id}/definitivo", response=MessageResponseSchema)
+def eliminar_cliente_definitivamente(request, cliente_id: str):
+    from django.shortcuts import get_object_or_404
+    from django.db import transaction
+    from django.db.models.signals import post_delete
+    from ..models import update_contrato_cache
+
+    cliente = get_object_or_404(Cliente, id=cliente_id)
+    nombre = cliente.nombre_completo
+
+    with transaction.atomic():
+        post_delete.disconnect(update_contrato_cache, sender=Pago)
+        try:
+            contratos = Contrato.objects.filter(cliente=cliente)
+            for c in contratos:
+                # Liberar la parcela a 'disponible'
+                p = c.parcela
+                p.estado = 'disponible'
+                p.save()
+            Pago.objects.filter(contrato__in=contratos).delete()
+            contratos.delete()
+            cliente.delete()
+        finally:
+            post_delete.connect(update_contrato_cache, sender=Pago)
+
+    return {"success": True, "message": f"El cliente {nombre} y sus registros asociados fueron eliminados definitivamente."}
 
 @router.put("/{lote_id}/propietario", response={200: ParcelaCompletaSchema})
 def cambiar_propietario(request, lote_id: str, payload: CambiarPropietarioInSchema):

@@ -13,3 +13,10 @@ class ClienteInSchema(Schema):
     email: Optional[str] = None
     telefono: Optional[str] = None
 
+class ClientePapeleraSchema(Schema):
+    id: UUID
+    nombre_completo: str
+    email: Optional[str] = None
+    telefono: Optional[str] = None
+    fecha_eliminacion: Optional[str] = None
+
